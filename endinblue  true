@@ -1,0 +1,16 @@
+[35mspotyourcargo.com/private/brevo_simple.php[m[36m:[m[32m2[m[36m:[m// api/auth/[1;31mbrevo[m_simple.php
+[35mspotyourcargo.com/private/brevo_simple.php[m[36m:[m[32m14[m[36m:[m            'api_endpoint' => 'https://api.[1;31mbrevo[m.com/v3/smtp/email',
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m89[m[36m:[m    error_log("DEBUG: BrevoSimpleEmail class not found, including [1;31mbrevo[m_simple.php");
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m90[m[36m:[m    include_once __DIR__ . '/../private/[1;31mbrevo[m_simple.php';
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m91[m[36m:[m    error_log("DEBUG: [1;31mbrevo[m_simple.php included successfully");
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m107[m[36m:[m        $[1;31mbrevo[m = new BrevoSimpleEmail();
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m111[m[36m:[m        $result = $[1;31mbrevo[m->sendLoginNotification(
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m139[m[36m:[m        $[1;31mbrevo[m = new BrevoSimpleEmail();
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m142[m[36m:[m        $result = $[1;31mbrevo[m->sendWelcomeEmail(
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m174[m[36m:[m        $[1;31mbrevo[m = new BrevoSimpleEmail();
+[35mspotyourcargo.com/public_html/access.php[m[36m:[m[32m177[m[36m:[m        $result = $[1;31mbrevo[m->sendVerificationEmail(
+[35mspotyourcargo.com/public_html/request-password-reset.php[m[36m:[m[32m34[m[36m:[m$[1;31mbrevo[m_path = __DIR__ . '/../private/[1;31mbrevo[m_simple.php';
+[35mspotyourcargo.com/public_html/request-password-reset.php[m[36m:[m[32m35[m[36m:[mif (!file_exists($[1;31mbrevo[m_path)) {
+[35mspotyourcargo.com/public_html/request-password-reset.php[m[36m:[m[32m38[m[36m:[minclude_once $[1;31mbrevo[m_path;
+[35mspotyourcargo.com/public_html/request-password-reset.php[m[36m:[m[32m71[m[36m:[m            $[1;31mbrevo[m = new BrevoSimpleEmail();
+[35mspotyourcargo.com/public_html/request-password-reset.php[m[36m:[m[32m72[m[36m:[m            $email_sent = $[1;31mbrevo[m->sendPasswordResetEmail($user['email'], $user['full_name'], $reset_url);
