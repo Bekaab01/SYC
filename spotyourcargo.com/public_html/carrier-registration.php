@@ -129,8 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_registration
             // Begin transaction
             $pdo->beginTransaction();
 
-            // Generate SYC carrier ID
-            $syc_id = 'SYC-C-' . str_pad($user_id, 4, '0', STR_PAD_LEFT);
+            // Use the SYC ID from users table (already generated during signup)
+            $syc_id = $user_data['syc_id'];
 
             // Initialize common data
             $carrier_data = [

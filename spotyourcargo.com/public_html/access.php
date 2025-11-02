@@ -57,12 +57,12 @@ $signup_error = '';
 
 // Function to generate unique SYC ID
 function generateSYCID($user_type, $pdo) {
-    if ($user_type === 'carrier') {
-        $prefix = 'SYC-C-';
+    if ($user_type === 'association') {
+        $prefix = 'SYC-A-';
     } elseif ($user_type === 'transitor') {
         $prefix = 'SYC-T-';
     } else {
-        $prefix = 'SYC-S-'; // shipper
+        $prefix = 'SYC-S-'; // shipper (default)
     }
 
     // Get the highest existing ID for this user type
@@ -164,7 +164,7 @@ function generateVerificationToken() {
 }
 
 // Function to send verification email
-function sendVerificationEmail($user, $verificationUrl) {
+function sendVerificationEmail($user, $verificationUrl, $appUrl) {
     try {
         if (!class_exists('BrevoSimpleEmail')) {
             error_log("ERROR: BrevoSimpleEmail class not found for verification email");
@@ -327,7 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     'full_name' => $user['full_name'],
                     'user_type' => $user['user_type'],
                     'syc_id' => $user['syc_id']
-                ], $verificationUrl);
+                ], $verificationUrl, $appUrl);
                 
                 if ($verificationSent) {
                     $login_success = 'Verification email sent! Please check your inbox and spam folder.';
@@ -384,6 +384,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['signup'])) {
         } else {
             // Generate unique SYC ID and hash password
             $syc_id = generateSYCID($user_type, $pdo);
+            // DEBUG: Log the generated SYC ID
+            error_log("DEBUG: Generated SYC ID for user_type '{$user_type}': {$syc_id}");
+
             $password_hash = password_hash($password, PASSWORD_DEFAULT);
             $created_at = date('Y-m-d H:i:s');
 
@@ -469,10 +472,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['signup'])) {
                 // Send verification email
                 $verificationSent = sendVerificationEmail([
                     'email' => $email,
-                    'full_name' => $full_name,
-                    'usertype' => $user_type,
-                    'syc_id' => $syc_id
-                ], $verificationUrl);
+                    'full_name' => $full_name
+                ], $verificationUrl, $appUrl);
 
                 // Set session variables (but mark as unverified)
                 $_SESSION['user_id'] = $user_id;
@@ -533,7 +534,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 } else {
     // Check for URL parameters to auto-open signup form
-    if ($auto_action === 'signup' || $auto_action === 'register') {
+    if ($auto_action === 'signup' || $auto_action === 'register' || !empty($auto_role)) {
         $login_active = '';
         $signup_active = 'active';
     } else {
@@ -1141,38 +1142,7 @@ if ((!empty($login_error) || !empty($login_success)) && empty($signup_error)) {
             font-size: 18px;
         }
         
-        /* Floating Icons Animation */
-        .floating-icon {
-            position: absolute;
-            font-size: 24px;
-            opacity: 0.7;
-            color: var(--primary-yellow);
-            z-index: 1;
-        }
-        
-        .floating-icon:nth-child(1) {
-            top: 20%;
-            left: 10%;
-            animation: float 6s ease-in-out infinite;
-        }
-        
-        .floating-icon:nth-child(2) {
-            top: 30%;
-            right: 15%;
-            animation: float 8s ease-in-out infinite 1s;
-        }
-        
-        .floating-icon:nth-child(3) {
-            bottom: 40%;
-            left: 20%;
-            animation: float 7s ease-in-out infinite 0.5s;
-        }
-        
-        @keyframes float {
-            0% { transform: translateY(0) rotate(0deg); }
-            50% { transform: translateY(-20px) rotate(5deg); }
-            100% { transform: translateY(0) rotate(0deg); }
-        }
+
         
         /* Responsive Design */
         @media (max-width: 987px) {
@@ -1290,17 +1260,7 @@ if ((!empty($login_error) || !empty($login_success)) && empty($signup_error)) {
     <div class="auth-container">
         <!-- Left Side - Branding -->
         <div class="auth-left">
-            <!-- Floating Icons -->
-            <div class="floating-icon">
-                <i class="fas fa-route"></i>
-            </div>
-            <div class="floating-icon">
-                <i class="fas fa-map-marker-alt"></i>
-            </div>
-            <div class="floating-icon">
-                <i class="fas fa-shipping-fast"></i>
-            </div>
-            
+            <?php include 'assets/php/floating-animation.php'; ?>
             <div class="auth-left-content">
                 <h2>Welcome to SYC</h2>
                 <p>Your instant freight matching solution. Connect with reliable carriers or find cargo to transport.</p>
@@ -1645,11 +1605,6 @@ if ((!empty($login_error) || !empty($login_success)) && empty($signup_error)) {
         document.getElementById('privacyLink').addEventListener('click', function(e) {
             e.preventDefault();
             openModal('privacyModal');
-        });
-
-        document.getElementById('forgotPasswordLink').addEventListener('click', function(e) {
-            e.preventDefault();
-            openModal('forgotPasswordModal');
         });
 
         // Close modals

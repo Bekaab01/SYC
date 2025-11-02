@@ -1,4 +1,5 @@
 <?php
+
 // Configure session timeout for logged-in users (10 days)
 ini_set('session.gc_maxlifetime', 864000); // 10 days in seconds
 ini_set('session.cookie_lifetime', 864000); // Make cookies persistent for 10 days
@@ -6,6 +7,16 @@ session_start();
 
 // Include database connection
 include_once __DIR__ . '/../private/db.php';
+
+// Handle tab parameter
+$allowed_tabs = [
+    'dashboard','requests','invoices','registered-trucks',
+    'available-carriers','matching','active-requests','reports','profile'
+];
+$current_tab = $_GET['tab'] ?? 'dashboard';
+if (!in_array($current_tab, $allowed_tabs)) {
+    $current_tab = 'dashboard';
+}
 
 // Handle logout
 if (isset($_GET['logout'])) {
@@ -272,11 +283,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_driver'])) {
     if ($association_id && $truck_id && $driver_id) {
         try {
             // First, unassign driver from any other truck
-            $unassign_stmt = $pdo->prepare("UPDATE trucks SET driver_id = NULL WHERE driver_id = ? AND association_id = ?");
+            $unassign_stmt = $pdo->prepare("UPDATE association_trucks SET driver_id = NULL WHERE driver_id = ? AND association_id = ?");
             $unassign_stmt->execute([$driver_id, $association_id]);
 
             // Assign driver to selected truck
-            $assign_stmt = $pdo->prepare("UPDATE trucks SET driver_id = ?, updated_at = NOW() WHERE id = ? AND association_id = ?");
+            $assign_stmt = $pdo->prepare("UPDATE association_trucks SET driver_id = ?, updated_at = NOW() WHERE id = ? AND association_id = ?");
             $assign_stmt->execute([$driver_id, $truck_id, $association_id]);
 
             if ($assign_stmt->rowCount() > 0) {
@@ -287,7 +298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_driver'])) {
                 $update_driver->execute([$driver_id]);
 
                 // Add notification
-                $truck_info = $pdo->prepare("SELECT plate_number FROM trucks WHERE id = ?");
+                $truck_info = $pdo->prepare("SELECT plate_number FROM association_trucks WHERE id = ?");
                 $truck_info->execute([$truck_id]);
                 $truck_data = $truck_info->fetch(PDO::FETCH_ASSOC);
 
@@ -319,7 +330,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_service_reques
     if ($association_id && $service_request_id && $truck_id && $driver_id) {
         try {
             $update_stmt = $pdo->prepare("
-                UPDATE service_requests 
+                UPDATE service_requests
                 SET association_id = ?, truck_id = ?, driver_id = ?, delivery_status = 'accepted', updated_at = NOW()
                 WHERE id = ?
             ");
@@ -329,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_service_reques
                 $success_message = "Service request accepted successfully!";
 
                 // Update truck and driver status
-                $update_truck = $pdo->prepare("UPDATE trucks SET status = 'on-trip', updated_at = NOW() WHERE id = ?");
+                $update_truck = $pdo->prepare("UPDATE association_trucks SET status = 'on-trip', updated_at = NOW() WHERE id = ?");
                 $update_truck->execute([$truck_id]);
 
                 $update_driver = $pdo->prepare("UPDATE drivers SET status = 'on-trip', updated_at = NOW() WHERE id = ?");
@@ -375,7 +386,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_delivery_statu
                     $request_data = $request_info->fetch(PDO::FETCH_ASSOC);
 
                     if ($request_data) {
-                        $update_truck = $pdo->prepare("UPDATE trucks SET status = 'active', updated_at = NOW() WHERE id = ?");
+                        $update_truck = $pdo->prepare("UPDATE association_trucks SET status = 'active', updated_at = NOW() WHERE id = ?");
                         $update_truck->execute([$request_data['truck_id']]);
 
                         $update_driver = $pdo->prepare("UPDATE drivers SET status = 'available', updated_at = NOW() WHERE id = ?");
@@ -421,7 +432,7 @@ if ($association_id) {
         $table_check = $pdo->query("SHOW TABLES LIKE 'service_requests'");
         if ($table_check->rowCount() > 0) {
             $requests_stmt = $pdo->prepare("
-                SELECT sr.*, 
+                SELECT sr.*,
                        s.company_name as shipper_company,
                        s.contact_person as shipper_contact,
                        t.company_name as transitor_company,
@@ -449,7 +460,7 @@ if ($association_id) {
         $table_check = $pdo->query("SHOW TABLES LIKE 'service_requests'");
         if ($table_check->rowCount() > 0) {
             $active_requests_stmt = $pdo->prepare("
-                SELECT sr.*, 
+                SELECT sr.*,
                        s.company_name as shipper_company,
                        s.contact_person as shipper_contact,
                        t.company_name as transitor_company,
@@ -478,7 +489,7 @@ if ($association_id) {
         $table_check = $pdo->query("SHOW TABLES LIKE 'service_requests'");
         if ($table_check->rowCount() > 0) {
             $completed_requests_stmt = $pdo->prepare("
-                SELECT sr.*, 
+                SELECT sr.*,
                        s.company_name as shipper_company,
                        t.company_name as transitor_company,
                        tr.plate_number as truck_plate,
@@ -591,7 +602,7 @@ if ($association_id) {
         $performance_metrics['completed_requests'] = $completed_requests_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
         // Completion rate
-        $performance_metrics['completion_rate'] = $performance_metrics['total_requests'] > 0 ? 
+        $performance_metrics['completion_rate'] = $performance_metrics['total_requests'] > 0 ?
             round(($performance_metrics['completed_requests'] / $performance_metrics['total_requests']) * 100, 1) : 0;
 
         // Active trucks
@@ -653,6 +664,18 @@ try {
 } catch (PDOException $e) {
     error_log("Messages error: " . $e->getMessage());
 }
+
+// Fetch invoices
+$invoices = [];
+if ($association_id) {
+    try {
+        $invoices_stmt = $pdo->prepare("SELECT * FROM invoices WHERE association_id = ? ORDER BY created_at DESC");
+        $invoices_stmt->execute([$association_id]);
+        $invoices = $invoices_stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Invoices fetch error: " . $e->getMessage());
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -710,7 +733,7 @@ try {
             display: flex;
             flex-direction: column;
             z-index: 100;
-            transition: left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transition: var(--transition);
         }
 
         /* Top Fixed Section */
@@ -871,6 +894,7 @@ try {
             flex: 1;
             margin-left: var(--sidebar-width);
             width: calc(100% - var(--sidebar-width));
+            transition: var(--transition);
         }
 
         /* Top Header */
@@ -885,6 +909,28 @@ try {
             position: sticky;
             top: 0;
             z-index: 99;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+        }
+
+        .menu-toggle {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: var(--dark-gray);
+            cursor: pointer;
+            padding: 10px;
+            margin-right: 10px;
+            border-radius: 5px;
+            transition: var(--transition);
+        }
+
+        .menu-toggle:hover {
+            background: rgba(0, 0, 0, 0.05);
         }
 
         .search-bar {
@@ -1000,216 +1046,278 @@ try {
             position: relative;
             cursor: pointer;
             color: var(--dark-gray);
-            font-size: 18px;
         }
 
-        .notification-badge {
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            background: #e74c3c;
-            color: white;
+        /* Additional responsive styles */
+        @media (max-width: 768px) {
+            .sidebar {
+                left: -100%;
+            }
+
+            .sidebar.mobile-open {
+                left: 0;
+            }
+
+            .main-content {
+                margin-left: 0;
+                width: 100%;
+            }
+
+            .top-header {
+                padding: 0 15px;
+            }
+
+            .dashboard-content {
+                padding: 15px;
+            }
+
+            .welcome-banner {
+                flex-direction: column;
+                text-align: center;
+                gap: 20px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            /* Mobile menu toggle button */
+            .menu-toggle {
+                display: block;
+            }
+
+            /* Sidebar overlay for mobile */
+            .sidebar-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 98;
+            }
+
+            .sidebar-overlay.show {
+                display: block;
+            }
+        }
+
+        /* Hide mobile menu toggle on desktop */
+        @media (min-width: 769px) {
+            .menu-toggle {
+                display: none;
+            }
+        }
+
+        /* Loading States */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid var(--primary-blue);
             border-radius: 50%;
-            width: 18px;
-            height: 18px;
-            font-size: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
         }
 
-        .user-menu {
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Error/Success Messages */
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
             gap: 10px;
-            cursor: pointer;
-            padding: 5px 10px;
-            border-radius: 8px;
-            transition: var(--transition);
         }
 
-        .user-menu:hover {
-            background: var(--light-gray);
+        .alert-success {
+            background: rgba(40, 167, 69, 0.1);
+            color: #155724;
+            border: 1px solid rgba(40, 167, 69, 0.2);
         }
 
-        .user-menu-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: var(--primary-blue);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 14px;
+        .alert-error {
+            background: rgba(220, 53, 69, 0.1);
+            color: #721c24;
+            border: 1px solid rgba(220, 53, 69, 0.2);
         }
 
-        .user-menu-name {
-            font-weight: 500;
-        }
-
-        .user-dropdown {
-            position: absolute;
-            top: 100%;
-            right: 0;
-            width: 200px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            z-index: 1000;
-            display: none;
-        }
-
-        .user-dropdown.show {
-            display: block;
-        }
-
-        .user-dropdown a {
-            display: block;
-            padding: 12px 20px;
-            text-decoration: none;
-            color: var(--dark-gray);
-            transition: var(--transition);
-            border-bottom: 1px solid #f5f5f5;
-        }
-
-        .user-dropdown a:hover {
-            background: var(--light-gray);
-            color: var(--primary-blue);
-        }
-
-        .user-dropdown a:last-child {
-            border-bottom: none;
+        .alert i {
+            font-size: 18px;
         }
 
         /* Dashboard Content */
         .dashboard-content {
             padding: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
         }
 
-        .dashboard-header {
+        /* Welcome Banner */
+        .welcome-banner {
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 15px;
             margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--card-shadow);
         }
 
-        .dashboard-header h1 {
+        .welcome-text h2 {
             font-size: 28px;
-            font-weight: 700;
-            color: var(--primary-blue);
             margin-bottom: 10px;
+            font-weight: 700;
         }
 
-        .dashboard-header p {
-            color: var(--text-light);
+        .welcome-text p {
             font-size: 16px;
+            opacity: 0.9;
+            margin: 0;
         }
 
-        /* Stats Cards */
+        .banner-cta {
+            background: var(--primary-yellow);
+            color: var(--primary-blue);
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .banner-cta:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 215, 0, 0.3);
+        }
+
+        /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
         }
 
         .stat-card {
-            background: white;
-            border-radius: 12px;
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
             padding: 25px;
             box-shadow: var(--card-shadow);
-            display: flex;
-            align-items: center;
             transition: var(--transition);
         }
 
         .stat-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .stat-title {
+            font-size: 14px;
+            color: var(--text-light);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .stat-icon {
-            width: 60px;
-            height: 60px;
+            width: 50px;
+            height: 50px;
             border-radius: 12px;
+            background: var(--primary-blue);
+            color: white;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-right: 20px;
-            font-size: 24px;
+            font-size: 20px;
         }
 
-        .stat-info h3 {
-            font-size: 24px;
+        .stat-value {
+            font-size: 32px;
             font-weight: 700;
-            margin-bottom: 5px;
+            color: var(--dark-gray);
+            margin-bottom: 10px;
         }
 
-        .stat-info p {
+        .stat-change {
+            font-size: 12px;
             color: var(--text-light);
-            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
 
-        .stat-card.blue .stat-icon {
-            background: rgba(0, 51, 102, 0.1);
+        .stat-change i {
             color: var(--primary-blue);
         }
 
-        .stat-card.green .stat-icon {
-            background: rgba(46, 204, 113, 0.1);
-            color: #2ecc71;
-        }
-
-        .stat-card.yellow .stat-icon {
-            background: rgba(255, 215, 0, 0.1);
-            color: var(--primary-yellow);
-        }
-
-        .stat-card.orange .stat-icon {
-            background: rgba(255, 165, 0, 0.1);
-            color: #ffa500;
-        }
-
-        /* Dashboard Sections */
-        .dashboard-section {
+        /* Content Sections */
+        .content-section {
             background: white;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: var(--card-shadow);
+            border-radius: 15px;
+            padding: 30px;
             margin-bottom: 30px;
+            box-shadow: var(--card-shadow);
+            border: 1px solid #f0f0f0;
         }
 
         .section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #eee;
+            margin-bottom: 25px;
         }
 
-        .section-header h2 {
-            font-size: 20px;
+        .section-title {
+            font-size: 24px;
             font-weight: 600;
-            color: var(--primary-blue);
+            color: var(--dark-gray);
+            margin: 0;
         }
 
-        .section-actions {
-            display: flex;
-            gap: 10px;
-        }
-
+        /* Buttons */
         .btn {
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            transition: var(--transition);
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 500;
             text-decoration: none;
+            cursor: pointer;
+            transition: var(--transition);
+            border: none;
             font-size: 14px;
         }
 
@@ -1220,771 +1328,563 @@ try {
 
         .btn-primary:hover {
             background: var(--secondary-blue);
-            transform: translateY(-2px);
-        }
-
-        .btn-secondary {
-            background: var(--light-gray);
-            color: var(--dark-gray);
-        }
-
-        .btn-secondary:hover {
-            background: #e0e0e0;
+            transform: translateY(-1px);
         }
 
         .btn-success {
-            background: #2ecc71;
+            background: #28a745;
             color: white;
         }
 
         .btn-success:hover {
-            background: #27ae60;
+            background: #218838;
         }
 
-        .btn-warning {
-            background: #f39c12;
+        .btn-secondary {
+            background: #6c757d;
             color: white;
         }
 
-        .btn-warning:hover {
-            background: #e67e22;
+        .btn-secondary:hover {
+            background: #5a6268;
         }
 
         .btn-sm {
-            padding: 6px 12px;
+            padding: 8px 16px;
             font-size: 12px;
         }
 
-        /* Tables */
-        .table-responsive {
-            overflow-x: auto;
-        }
-
+        /* Data Tables */
         .data-table {
             width: 100%;
             border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
         }
 
         .data-table th {
             background: #f8f9fa;
-            padding: 12px 15px;
-            text-align: left;
             font-weight: 600;
             color: var(--dark-gray);
-            border-bottom: 1px solid #eee;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .data-table td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #eee;
-        }
-
-        .data-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .data-table tr:hover {
-            background: #f9f9f9;
-        }
-
-        /* Status badges */
-        .status-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .status-pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status-active {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-
-        .status-completed {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-inactive {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .status-available {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-on-trip {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status-assigned {
-            background: #d1ecf1;
-            color: #0c5460;
+        .data-table tbody tr:hover {
+            background: #f8f9fa;
         }
 
         /* Forms */
-        .form-group {
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
             margin-bottom: 20px;
         }
 
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
         .form-label {
-            display: block;
-            margin-bottom: 8px;
             font-weight: 500;
             color: var(--dark-gray);
+            margin-bottom: 8px;
+            font-size: 14px;
         }
 
         .form-control {
-            width: 100%;
             padding: 12px 15px;
-            border: 1px solid #ddd;
+            border: 2px solid #e9ecef;
             border-radius: 8px;
             font-size: 14px;
             transition: var(--transition);
         }
 
         .form-control:focus {
-            border-color: var(--primary-blue);
             outline: none;
+            border-color: var(--primary-blue);
             box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.1);
         }
 
-        .form-row {
-            display: flex;
-            gap: 15px;
+        /* Status Badges */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .form-row .form-group {
-            flex: 1;
+        .status-active {
+            background: rgba(40, 167, 69, 0.1);
+            color: #155724;
         }
 
-        /* Modal */
+        .status-on-trip {
+            background: rgba(255, 193, 7, 0.1);
+            color: #856404;
+        }
+
+        .status-available {
+            background: rgba(0, 123, 255, 0.1);
+            color: #004085;
+        }
+
+        .status-accepted {
+            background: rgba(255, 193, 7, 0.1);
+            color: #856404;
+        }
+
+        .status-in-transit {
+            background: rgba(0, 123, 255, 0.1);
+            color: #004085;
+        }
+
+        .status-delivered {
+            background: rgba(40, 167, 69, 0.1);
+            color: #155724;
+        }
+
+        /* Modals */
         .modal {
             display: none;
             position: fixed;
-            top: 0;
+            z-index: 1000;
             left: 0;
+            top: 0;
             width: 100%;
             height: 100%;
             background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
+            backdrop-filter: blur(5px);
         }
 
         .modal.show {
             display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .modal-content {
             background: white;
-            border-radius: 12px;
+            border-radius: 15px;
             width: 90%;
-            max-width: 600px;
+            max-width: 500px;
             max-height: 90vh;
             overflow-y: auto;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
         }
 
         .modal-header {
-            padding: 20px 25px;
+            padding: 25px 30px;
             border-bottom: 1px solid #eee;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
-        .modal-header h3 {
+        .modal-title {
             font-size: 20px;
             font-weight: 600;
-            color: var(--primary-blue);
+            color: var(--dark-gray);
+            margin: 0;
         }
 
         .modal-close {
             background: none;
             border: none;
-            font-size: 20px;
+            font-size: 24px;
             cursor: pointer;
             color: var(--text-light);
-        }
-
-        .modal-body {
-            padding: 25px;
-        }
-
-        .modal-footer {
-            padding: 20px 25px;
-            border-top: 1px solid #eee;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-
-        /* Alert messages */
-        .alert {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        /* Tabs */
-        .tabs {
-            display: flex;
-            border-bottom: 1px solid #eee;
-            margin-bottom: 20px;
-        }
-
-        .tab {
-            padding: 12px 20px;
-            cursor: pointer;
-            font-weight: 500;
-            color: var(--text-light);
-            border-bottom: 2px solid transparent;
-            transition: var(--transition);
-        }
-
-        .tab.active {
-            color: var(--primary-blue);
-            border-bottom: 2px solid var(--primary-blue);
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-light);
-        }
-
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 15px;
-            color: #ddd;
-        }
-
-        .empty-state h3 {
-            font-size: 18px;
-            margin-bottom: 10px;
-            color: var(--dark-gray);
-        }
-
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .sidebar {
-                left: -100%;
-            }
-
-            .sidebar.active {
-                left: 0;
-            }
-
-            .main-content {
-                margin-left: 0;
-                width: 100%;
-            }
-
-            .mobile-menu-toggle {
-                display: block;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .top-header {
-                padding: 0 15px;
-            }
-
-            .search-bar {
-                width: 200px;
-            }
-
-            .dashboard-content {
-                padding: 20px 15px;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .form-row {
-                flex-direction: column;
-                gap: 0;
-            }
-        }
-
-        /* Mobile menu toggle */
-        .mobile-menu-toggle {
-            display: none;
-            background: none;
-            border: none;
-            font-size: 20px;
-            color: var(--dark-gray);
-            cursor: pointer;
-            padding: 10px;
-        }
-
-        /* Profile section */
-        .profile-section {
-            display: flex;
-            gap: 30px;
-        }
-
-        .profile-sidebar {
-            width: 250px;
-            flex-shrink: 0;
-        }
-
-        .profile-content {
-            flex: 1;
-        }
-
-        .profile-card {
-            background: white;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: var(--card-shadow);
-            margin-bottom: 20px;
-        }
-
-        .profile-avatar {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background: var(--primary-blue);
-            color: white;
+            padding: 0;
+            width: 30px;
+            height: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 28px;
-            font-weight: 600;
-            margin: 0 auto 15px;
+            border-radius: 50%;
+            transition: var(--transition);
         }
 
-        .profile-info h3 {
-            text-align: center;
-            margin-bottom: 5px;
+        .modal-close:hover {
+            background: #f8f9fa;
+            color: var(--dark-gray);
         }
 
-        .profile-info p {
-            text-align: center;
-            color: var(--text-light);
-            margin-bottom: 20px;
+        .modal-body {
+            padding: 30px;
         }
 
-        .profile-stats {
-            display: flex;
-            justify-content: space-between;
-            text-align: center;
-        }
-
-        .profile-stat h4 {
-            font-size: 18px;
-            margin-bottom: 5px;
-        }
-
-        .profile-stat p {
-            font-size: 12px;
-            color: var(--text-light);
-        }
-
-        /* Progress bars */
-        .progress-bar {
-            height: 8px;
-            background: #eee;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 5px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: var(--primary-blue);
-            border-radius: 4px;
-        }
-
-        /* Map container */
-        .map-container {
-            height: 300px;
-            background: #f5f5f5;
-            border-radius: 8px;
-            overflow: hidden;
-            margin-top: 15px;
-        }
-
-        /* Service request cards */
-        .request-card {
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-            margin-bottom: 15px;
-            border-left: 4px solid var(--primary-blue);
-        }
-
-        .request-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-
-        .request-title {
-            font-weight: 600;
-            font-size: 16px;
-            color: var(--primary-blue);
-        }
-
-        .request-meta {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 10px;
-        }
-
-        .request-meta-item {
+        /* Notification Badge */
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            font-size: 10px;
             display: flex;
             align-items: center;
-            gap: 5px;
-            font-size: 14px;
-            color: var(--text-light);
-        }
-
-        .request-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 3px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
+            justify-content: center;
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
-    <?php include 'assets/php/sidebar-association.php'; ?>
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <!-- Top Fixed Section: Logo -->
+        <div class="sidebar-top">
+            <a href="index.php" class="sidebar-logo">
+                <img src="assets/img/SYC-Transparent.png" alt="SYC" style="filter: brightness(0) invert(1);">
+                <span class="sidebar-logo-text">SYC<span class="sidebar-logo-dot">.</span></span>
+            </a>
+        </div>
+
+        <!-- Middle Scrollable Section: Navigation Menu -->
+        <div class="sidebar-middle">
+            <nav class="sidebar-nav">
+                <ul>
+                    <li><a href="?tab=dashboard" class="<?php echo $current_tab === 'dashboard' ? 'active' : ''; ?>"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
+                    <li><a href="?tab=requests" class="<?php echo $current_tab === 'requests' ? 'active' : ''; ?>"><i class="fas fa-clipboard-list"></i> Service Requests</a></li>
+                    <li><a href="?tab=registered-trucks" class="<?php echo $current_tab === 'registered-trucks' ? 'active' : ''; ?>"><i class="fas fa-truck"></i> Registered Trucks</a></li>
+                    <li><a href="?tab=active-requests" class="<?php echo $current_tab === 'active-requests' ? 'active' : ''; ?>"><i class="fas fa-tasks"></i> Active Requests</a></li>
+                    <li><a href="?tab=reports" class="<?php echo $current_tab === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-bar"></i> Reports</a></li>
+                    <li><a href="?tab=invoices" class="<?php echo $current_tab === 'invoices' ? 'active' : ''; ?>"><i class="fas fa-file-invoice-dollar"></i> Invoices</a></li>
+                    <li><a href="?tab=profile" class="<?php echo $current_tab === 'profile' ? 'active' : ''; ?>"><i class="fas fa-user"></i> Profile</a></li>
+                </ul>
+            </nav>
+        </div>
+
+        <!-- Bottom Fixed Section: User Info + Logout -->
+        <div class="sidebar-bottom">
+            <a href="?tab=profile" class="user-profile-link">
+                <div class="user-profile">
+                    <div class="user-avatar"><?php echo htmlspecialchars($user_initials); ?></div>
+                    <div class="user-info">
+                        <h4><?php echo htmlspecialchars($user_name); ?></h4>
+                        <p><?php echo htmlspecialchars($association_name); ?></p>
+                    </div>
+                </div>
+            </a>
+            <button class="logout-btn" onclick="window.location.href='?logout=1'">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile Sidebar Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
     <!-- Main Content -->
     <div class="main-content">
         <!-- Top Header -->
-        <div class="top-header">
-            <button class="mobile-menu-toggle">
-                <i class="fas fa-bars"></i>
-            </button>
-            
-            <div class="search-bar">
-                <i class="fas fa-search"></i>
-                <input type="text" placeholder="Search...">
+        <header class="top-header">
+            <div class="header-left">
+                <button class="menu-toggle" id="menuToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" placeholder="Search..." id="global-search">
+                </div>
             </div>
-            
+
             <div class="header-actions">
-                <div class="notification-icon" id="notificationToggle">
+                <a href="#" class="notification-icon" title="Notifications">
                     <i class="fas fa-bell"></i>
                     <?php if ($unread_notifications_count > 0): ?>
                         <span class="notification-badge"><?php echo $unread_notifications_count; ?></span>
                     <?php endif; ?>
-                </div>
-                
-                <div class="notification-dropdown" id="notificationDropdown">
-                    <div class="dropdown-header">
-                        <h3>Notifications</h3>
-                        <a href="#" id="markAllReadBtn">Mark all as read</a>
-                    </div>
-                    <div class="dropdown-list">
-                        <?php if (empty($notifications)): ?>
-                            <div class="dropdown-item">
-                                <div class="dropdown-item-title">No notifications</div>
-                                <div class="dropdown-item-time">You're all caught up!</div>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach ($notifications as $notification): ?>
-                                <div class="dropdown-item <?php echo $notification['is_read'] ? '' : 'unread'; ?>">
-                                    <div class="dropdown-item-title"><?php echo htmlspecialchars($notification['message']); ?></div>
-                                    <div class="dropdown-item-time"><?php echo date('M j, g:i A', strtotime($notification['created_at'])); ?></div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                    <div class="dropdown-footer">
-                        <a href="#">View all notifications</a>
-                    </div>
-                </div>
-                
-                <div class="message-icon" id="messageToggle">
+                </a>
+
+                <a href="#" class="message-icon" title="Messages">
                     <i class="fas fa-envelope"></i>
                     <?php if ($unread_messages_count > 0): ?>
                         <span class="notification-badge"><?php echo $unread_messages_count; ?></span>
                     <?php endif; ?>
-                </div>
-                
-                <div class="notification-dropdown" id="messageDropdown">
-                    <div class="dropdown-header">
-                        <h3>Messages</h3>
-                        <a href="#">View all</a>
-                    </div>
-                    <div class="dropdown-list">
-                        <?php if (empty($messages)): ?>
-                            <div class="dropdown-item">
-                                <div class="dropdown-item-title">No messages</div>
-                                <div class="dropdown-item-time">Your inbox is empty</div>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach ($messages as $message): ?>
-                                <div class="dropdown-item <?php echo $message['is_read'] ? '' : 'unread'; ?>">
-                                    <div class="dropdown-item-title">From: <?php echo htmlspecialchars($message['sender_name'] ?? 'Unknown'); ?></div>
-                                    <div class="dropdown-item-desc"><?php echo htmlspecialchars(substr($message['message'], 0, 50)); ?>...</div>
-                                    <div class="dropdown-item-time"><?php echo date('M j, g:i A', strtotime($message['created_at'])); ?></div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                    <div class="dropdown-footer">
-                        <a href="#">Go to inbox</a>
-                    </div>
-                </div>
-                
-                <div class="user-menu" id="userMenuToggle">
-                    <div class="user-menu-avatar"><?php echo $user_initials; ?></div>
-                    <div class="user-menu-name"><?php echo htmlspecialchars($user_name); ?></div>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-                
-                <div class="user-dropdown" id="userDropdown">
-                    <a href="#profile"><i class="fas fa-user"></i> My Profile</a>
-                    <a href="#settings"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="#help"><i class="fas fa-question-circle"></i> Help & Support</a>
-                    <a href="?logout=true"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
+                </a>
             </div>
-        </div>
+        </header>
 
         <!-- Dashboard Content -->
-        <div class="dashboard-content">
-            <!-- Dashboard Header -->
-            <div class="dashboard-header">
-                <h1>Welcome, <?php echo htmlspecialchars($association_name); ?></h1>
-                <p>Manage your fleet, drivers, and service requests from one dashboard</p>
-            </div>
-
-            <!-- Alert Messages -->
-            <?php if ($success_message): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($success_message); ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($association_error): ?>
+        <main class="dashboard-content">
+            <!-- Error/Success Messages -->
+            <?php if (!empty($association_error)): ?>
                 <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($association_error); ?>
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <?php echo htmlspecialchars($association_error); ?>
                 </div>
             <?php endif; ?>
 
-            <!-- Stats Cards -->
+            <?php if (!empty($success_message)): ?>
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i>
+                    <?php echo htmlspecialchars($success_message); ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Welcome Banner -->
+            <div class="welcome-banner">
+                <div class="welcome-text">
+                    <h2>Welcome back, <?php echo htmlspecialchars($welcome_name); ?>!</h2>
+                    <p>Manage your fleet, service requests, and operations from your association dashboard.</p>
+                </div>
+                <button class="banner-cta" onclick="showTruckModal()">
+                    <i class="fas fa-plus"></i> Register Truck
+                </button>
+            </div>
+
+            <!-- Stats Grid -->
             <div class="stats-grid">
-                <div class="stat-card blue">
-                    <div class="stat-icon">
-                        <i class="fas fa-truck"></i>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-title">Total Trucks</div>
+                        <div class="stat-icon">
+                            <i class="fas fa-truck"></i>
+                        </div>
                     </div>
-                    <div class="stat-info">
-                        <h3><?php echo count($trucks); ?></h3>
-                        <p>Total Trucks</p>
-                    </div>
-                </div>
-                
-                <div class="stat-card green">
-                    <div class="stat-icon">
-                        <i class="fas fa-users"></i>
-                    </div>
-                    <div class="stat-info">
-                        <h3><?php echo count($drivers); ?></h3>
-                        <p>Registered Drivers</p>
+                    <div class="stat-value"><?php echo count($trucks); ?></div>
+                    <div class="stat-change">
+                        <i class="fas fa-arrow-up"></i> Registered
                     </div>
                 </div>
-                
-                <div class="stat-card yellow">
-                    <div class="stat-icon">
-                        <i class="fas fa-clipboard-list"></i>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-title">Active Requests</div>
+                        <div class="stat-icon">
+                            <i class="fas fa-clipboard-list"></i>
+                        </div>
                     </div>
-                    <div class="stat-info">
-                        <h3><?php echo count($active_requests); ?></h3>
-                        <p>Active Deliveries</p>
+                    <div class="stat-value"><?php echo count($active_requests); ?></div>
+                    <div class="stat-change">
+                        <i class="fas fa-clock"></i> In progress
                     </div>
                 </div>
-                
-                <div class="stat-card orange">
-                    <div class="stat-icon">
-                        <i class="fas fa-chart-line"></i>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-title">Available Drivers</div>
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
                     </div>
-                    <div class="stat-info">
-                        <h3><?php echo $performance_metrics['completion_rate']; ?>%</h3>
-                        <p>Completion Rate</p>
+                    <div class="stat-value"><?php echo count($available_drivers); ?></div>
+                    <div class="stat-change">
+                        <i class="fas fa-check-circle"></i> Ready
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-title">Completion Rate</div>
+                        <div class="stat-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                    </div>
+                    <div class="stat-value"><?php echo $performance_metrics['completion_rate']; ?>%</div>
+                    <div class="stat-change">
+                        <i class="fas fa-trophy"></i> This month
                     </div>
                 </div>
             </div>
 
-            <!-- Main Dashboard Sections -->
-            <div class="dashboard-sections">
-                <!-- Association Profile Section -->
-                <div class="dashboard-section" id="profile">
+            <!-- Tab Content -->
+            <?php if ($current_tab === 'dashboard'): ?>
+                <!-- Recent Service Requests -->
+                <div class="content-section">
                     <div class="section-header">
-                        <h2><i class="fas fa-user-circle"></i> Association Profile</h2>
-                        <div class="section-actions">
-                            <button class="btn btn-primary" onclick="openModal('editProfileModal')">
-                                <i class="fas fa-edit"></i> Edit Profile
-                            </button>
-                        </div>
+                        <h3 class="section-title">Available Service Requests</h3>
+                        <a href="?tab=requests" class="btn btn-primary">
+                            <i class="fas fa-eye"></i> View All
+                        </a>
                     </div>
-                    
-                    <div class="profile-section">
-                        <div class="profile-sidebar">
-                            <div class="profile-card">
-                                <div class="profile-avatar"><?php echo $user_initials; ?></div>
-                                <h3><?php echo htmlspecialchars($association_name); ?></h3>
-                                <p>Truck Association</p>
-                                
-                                <div class="profile-stats">
-                                    <div class="profile-stat">
-                                        <h4><?php echo count($trucks); ?></h4>
-                                        <p>Trucks</p>
-                                    </div>
-                                    <div class="profile-stat">
-                                        <h4><?php echo count($drivers); ?></h4>
-                                        <p>Drivers</p>
-                                    </div>
-                                    <div class="profile-stat">
-                                        <h4><?php echo $performance_metrics['completed_requests']; ?></h4>
-                                        <p>Deliveries</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="profile-content">
-                            <div class="profile-card">
-                                <h3>Association Information</h3>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">Association Name</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['association_name'] ?? 'Not set'); ?></p>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">License Number</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['license_number'] ?? 'Not set'); ?></p>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">Contact Person</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['contact_person'] ?? 'Not set'); ?></p>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Phone</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['phone'] ?? 'Not set'); ?></p>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">Email</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['association_email'] ?? $association_data['email'] ?? 'Not set'); ?></p>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Region</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo htmlspecialchars($association_data['region'] ?? 'Not set'); ?></p>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">Registration Status</label>
-                                        <p>
-                                            <span class="status-badge <?php 
-                                                echo ($association_data['registration_status'] ?? 'pending') === 'approved' ? 'status-active' : 
-                                                     (($association_data['registration_status'] ?? 'pending') === 'rejected' ? 'status-inactive' : 'status-pending'); 
-                                            ?>">
-                                                <?php echo ucfirst($association_data['registration_status'] ?? 'pending'); ?>
-                                            </span>
-                                        </p>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Member Since</label>
-                                        <p class="form-control" style="background: #f8f9fa;"><?php echo date('M j, Y', strtotime($association_data['association_created_at'] ?? $association_data['created_at'] ?? 'now')); ?></p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- Fleet Management Section -->
-                <div class="dashboard-section" id="fleet">
-                    <div class="section-header">
-                        <h2><i class="fas fa-truck"></i> Fleet Management</h2>
-                        <div class="section-actions">
-                            <button class="btn btn-primary" onclick="openModal('addTruckModal')">
-                                <i class="fas fa-plus"></i> Add Truck
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <?php if (empty($trucks)): ?>
-                        <div class="empty-state">
-                            <i class="fas fa-truck"></i>
-                            <h3>No trucks registered yet</h3>
-                            <p>Add your first truck to get started with service requests</p>
-                            <button class="btn btn-primary" onclick="openModal('addTruckModal')">
-                                <i class="fas fa-plus"></i> Add First Truck
-                            </button>
+                    <?php if (empty($available_requests)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-clipboard-list" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No available service requests at the moment.</p>
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive">
+                        <div style="overflow-x: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Request ID</th>
+                                        <th>Shipper</th>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Cargo Type</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach (array_slice($available_requests, 0, 5) as $request): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($request['id']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['shipper_company']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['origin_city'] . ', ' . $request['origin_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['destination_city'] . ', ' . $request['destination_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['cargo_type']); ?></td>
+                                            <td>
+                                                <button class="btn btn-success btn-sm" onclick="acceptRequest(<?php echo $request['id']; ?>)">
+                                                    <i class="fas fa-check"></i> Accept
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Recent Trucks -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Your Fleet</h3>
+                        <a href="?tab=registered-trucks" class="btn btn-primary">
+                            <i class="fas fa-eye"></i> View All
+                        </a>
+                    </div>
+
+                    <?php if (empty($trucks)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-truck" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No trucks registered yet. Add your first truck to get started!</p>
+                        </div>
+                    <?php else: ?>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                            <?php foreach (array_slice($trucks, 0, 3) as $truck): ?>
+                                <div style="border: 1px solid #eee; border-radius: 10px; padding: 20px;">
+                                    <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                                        <div style="width: 50px; height: 50px; border-radius: 50%; background: var(--primary-blue); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; margin-right: 15px;">
+                                            <i class="fas fa-truck"></i>
+                                        </div>
+                                        <div>
+                                            <h4 style="margin: 0; font-size: 16px;"><?php echo htmlspecialchars($truck['plate_number']); ?></h4>
+                                            <p style="margin: 5px 0 0 0; color: var(--text-light); font-size: 14px;">
+                                                <?php echo htmlspecialchars($truck['truck_type']); ?> - <?php echo htmlspecialchars($truck['capacity']); ?> tons
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <small style="color: var(--text-light);">Status:</small>
+                                            <span class="status-badge status-<?php echo strtolower($truck['status']); ?>">
+                                                <?php echo htmlspecialchars($truck['status']); ?>
+                                            </span>
+                                        </div>
+                                        <?php if (!empty($truck['driver_name'])): ?>
+                                            <small style="color: var(--text-light);">Driver: <?php echo htmlspecialchars($truck['driver_name']); ?></small>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($current_tab === 'requests'): ?>
+                <!-- Service Requests Tab -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Available Service Requests</h3>
+                    </div>
+
+                    <?php if (empty($available_requests)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-clipboard-list" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No available service requests at the moment.</p>
+                        </div>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Request ID</th>
+                                        <th>Shipper</th>
+                                        <th>Contact</th>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Cargo Type</th>
+                                        <th>Weight</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($available_requests as $request): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($request['id']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['shipper_company']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['shipper_contact']); ?><br><small><?php echo htmlspecialchars($request['shipper_phone']); ?></small></td>
+                                            <td><?php echo htmlspecialchars($request['origin_city'] . ', ' . $request['origin_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['destination_city'] . ', ' . $request['destination_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['cargo_type']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['weight'] . ' ' . $request['weight_unit']); ?></td>
+                                            <td>
+                                                <button class="btn btn-success btn-sm" onclick="acceptRequest(<?php echo $request['id']; ?>)">
+                                                    <i class="fas fa-check"></i> Accept
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($current_tab === 'registered-trucks'): ?>
+                <!-- Registered Trucks Tab -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Registered Trucks</h3>
+                        <button class="btn btn-primary" onclick="showTruckModal()">
+                            <i class="fas fa-plus"></i> Register New Truck
+                        </button>
+                    </div>
+
+                    <?php if (empty($trucks)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-truck" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No trucks registered yet. Add your first truck to get started!</p>
+                        </div>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
                             <table class="data-table">
                                 <thead>
                                     <tr>
                                         <th>Plate Number</th>
                                         <th>Truck Type</th>
                                         <th>Capacity</th>
-                                        <th>Assigned Driver</th>
+                                        <th>Driver</th>
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
@@ -1995,24 +1895,15 @@ try {
                                             <td><?php echo htmlspecialchars($truck['plate_number']); ?></td>
                                             <td><?php echo htmlspecialchars($truck['truck_type']); ?></td>
                                             <td><?php echo htmlspecialchars($truck['capacity']); ?> tons</td>
+                                            <td><?php echo htmlspecialchars($truck['driver_name'] ?? 'Unassigned'); ?></td>
                                             <td>
-                                                <?php if ($truck['driver_name']): ?>
-                                                    <?php echo htmlspecialchars($truck['driver_name']); ?>
-                                                <?php else: ?>
-                                                    <span class="text-muted">Not assigned</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <span class="status-badge <?php 
-                                                    echo $truck['status'] === 'active' ? 'status-active' : 
-                                                         ($truck['status'] === 'on-trip' ? 'status-on-trip' : 'status-inactive'); 
-                                                ?>">
-                                                    <?php echo ucfirst(str_replace('-', ' ', $truck['status'])); ?>
+                                                <span class="status-badge status-<?php echo strtolower($truck['status']); ?>">
+                                                    <?php echo htmlspecialchars($truck['status']); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <button class="btn btn-sm btn-secondary" onclick="assignDriverToTruck(<?php echo $truck['id']; ?>)">
-                                                    <i class="fas fa-user"></i> Assign Driver
+                                                <button class="btn btn-secondary btn-sm" onclick="assignDriver(<?php echo $truck['id']; ?>)">
+                                                    <i class="fas fa-user-plus"></i>
                                                 </button>
                                             </td>
                                         </tr>
@@ -2023,141 +1914,27 @@ try {
                     <?php endif; ?>
                 </div>
 
-                <!-- Drivers Management Section -->
-                <div class="dashboard-section" id="drivers">
+            <?php elseif ($current_tab === 'active-requests'): ?>
+                <!-- Active Requests Tab -->
+                <div class="content-section">
                     <div class="section-header">
-                        <h2><i class="fas fa-id-card"></i> Drivers Management</h2>
-                        <div class="section-actions">
-                            <button class="btn btn-primary" onclick="openModal('addDriverModal')">
-                                <i class="fas fa-plus"></i> Add Driver
-                            </button>
-                        </div>
+                        <h3 class="section-title">Active Service Requests</h3>
                     </div>
-                    
-                    <?php if (empty($drivers)): ?>
-                        <div class="empty-state">
-                            <i class="fas fa-id-card"></i>
-                            <h3>No drivers registered yet</h3>
-                            <p>Add your first driver to assign them to trucks</p>
-                            <button class="btn btn-primary" onclick="openModal('addDriverModal')">
-                                <i class="fas fa-plus"></i> Add First Driver
-                            </button>
-                        </div>
-                    <?php else: ?>
-                        <div class="table-responsive">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>License Number</th>
-                                        <th>Phone</th>
-                                        <th>Experience</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($drivers as $driver): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($driver['full_name']); ?></td>
-                                            <td><?php echo htmlspecialchars($driver['license_number']); ?></td>
-                                            <td><?php echo htmlspecialchars($driver['phone']); ?></td>
-                                            <td><?php echo htmlspecialchars($driver['experience_years'] ?? 0); ?> years</td>
-                                            <td>
-                                                <span class="status-badge <?php 
-                                                    echo $driver['status'] === 'available' ? 'status-available' : 
-                                                         ($driver['status'] === 'on-trip' ? 'status-on-trip' : 'status-assigned'); 
-                                                ?>">
-                                                    <?php echo ucfirst($driver['status']); ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <button class="btn btn-sm btn-secondary" onclick="assignDriver(<?php echo $driver['id']; ?>)">
-                                                    <i class="fas fa-truck"></i> Assign to Truck
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php endif; ?>
-                </div>
 
-                <!-- Service Requests Section -->
-                <div class="dashboard-section" id="requests">
-                    <div class="section-header">
-                        <h2><i class="fas fa-clipboard-list"></i> Available Service Requests</h2>
-                    </div>
-                    
-                    <?php if (empty($available_requests)): ?>
-                        <div class="empty-state">
-                            <i class="fas fa-clipboard-list"></i>
-                            <h3>No available service requests</h3>
-                            <p>New service requests from transitors will appear here</p>
-                        </div>
-                    <?php else: ?>
-                        <div class="requests-list">
-                            <?php foreach ($available_requests as $request): ?>
-                                <div class="request-card">
-                                    <div class="request-header">
-                                        <div class="request-title">Request #<?php echo $request['id']; ?> - <?php echo htmlspecialchars($request['cargo_description']); ?></div>
-                                        <span class="status-badge status-pending">Pending</span>
-                                    </div>
-                                    
-                                    <div class="request-meta">
-                                        <div class="request-meta-item">
-                                            <i class="fas fa-map-marker-alt"></i>
-                                            <span><?php echo htmlspecialchars($request['origin']); ?> → <?php echo htmlspecialchars($request['destination']); ?></span>
-                                        </div>
-                                        <div class="request-meta-item">
-                                            <i class="fas fa-weight-hanging"></i>
-                                            <span><?php echo htmlspecialchars($request['cargo_weight']); ?> tons</span>
-                                        </div>
-                                        <div class="request-meta-item">
-                                            <i class="fas fa-user"></i>
-                                            <span>Shipper: <?php echo htmlspecialchars($request['shipper_company'] ?? 'Unknown'); ?></span>
-                                        </div>
-                                        <div class="request-meta-item">
-                                            <i class="fas fa-building"></i>
-                                            <span>Transitor: <?php echo htmlspecialchars($request['transitor_company'] ?? 'Unknown'); ?></span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="request-actions">
-                                        <button class="btn btn-primary btn-sm" onclick="acceptServiceRequest(<?php echo $request['id']; ?>)">
-                                            <i class="fas fa-check"></i> Accept Request
-                                        </button>
-                                        <button class="btn btn-secondary btn-sm" onclick="viewRequestDetails(<?php echo $request['id']; ?>)">
-                                            <i class="fas fa-eye"></i> View Details
-                                        </button>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-
-                <!-- Active Deliveries Section -->
-                <div class="dashboard-section" id="active">
-                    <div class="section-header">
-                        <h2><i class="fas fa-shipping-fast"></i> Active Deliveries</h2>
-                    </div>
-                    
                     <?php if (empty($active_requests)): ?>
-                        <div class="empty-state">
-                            <i class="fas fa-shipping-fast"></i>
-                            <h3>No active deliveries</h3>
-                            <p>Accepted service requests will appear here</p>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-tasks" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No active service requests.</p>
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive">
+                        <div style="overflow-x: auto;">
                             <table class="data-table">
                                 <thead>
                                     <tr>
                                         <th>Request ID</th>
-                                        <th>Route</th>
-                                        <th>Cargo</th>
+                                        <th>Shipper</th>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
                                         <th>Truck</th>
                                         <th>Driver</th>
                                         <th>Status</th>
@@ -2167,21 +1944,20 @@ try {
                                 <tbody>
                                     <?php foreach ($active_requests as $request): ?>
                                         <tr>
-                                            <td>#<?php echo $request['id']; ?></td>
-                                            <td><?php echo htmlspecialchars($request['origin']); ?> → <?php echo htmlspecialchars($request['destination']); ?></td>
-                                            <td><?php echo htmlspecialchars($request['cargo_description']); ?> (<?php echo htmlspecialchars($request['cargo_weight']); ?> tons)</td>
-                                            <td><?php echo htmlspecialchars($request['truck_plate'] ?? 'Not assigned'); ?></td>
-                                            <td><?php echo htmlspecialchars($request['driver_name'] ?? 'Not assigned'); ?></td>
+                                            <td><?php echo htmlspecialchars($request['id']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['shipper_company']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['origin_city'] . ', ' . $request['origin_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['destination_city'] . ', ' . $request['destination_country']); ?></td>
+                                            <td><?php echo htmlspecialchars($request['truck_plate'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($request['driver_name'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <span class="status-badge <?php 
-                                                    echo $request['delivery_status'] === 'in transit' ? 'status-active' : 'status-pending'; 
-                                                ?>">
-                                                    <?php echo ucfirst(str_replace('_', ' ', $request['delivery_status'])); ?>
+                                                <span class="status-badge status-<?php echo strtolower(str_replace(' ', '-', $request['delivery_status'])); ?>">
+                                                    <?php echo htmlspecialchars($request['delivery_status']); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <button class="btn btn-sm btn-warning" onclick="updateDeliveryStatus(<?php echo $request['id']; ?>)">
-                                                    <i class="fas fa-edit"></i> Update Status
+                                                <button class="btn btn-primary btn-sm" onclick="updateStatus(<?php echo $request['id']; ?>)">
+                                                    <i class="fas fa-edit"></i>
                                                 </button>
                                             </td>
                                         </tr>
@@ -2192,40 +1968,277 @@ try {
                     <?php endif; ?>
                 </div>
 
-                <!-- Delivery History Section -->
-                <div class="dashboard-section" id="history">
+            <?php elseif ($current_tab === 'profile'): ?>
+                <!-- Profile Tab -->
+                <div class="content-section">
                     <div class="section-header">
-                        <h2><i class="fas fa-history"></i> Delivery History</h2>
+                        <h3 class="section-title">Association Profile</h3>
                     </div>
-                    
-                    <?php if (empty($completed_requests)): ?>
-                        <div class="empty-state">
-                            <i class="fas fa-history"></i>
-                            <h3>No delivery history</h3>
-                            <p>Completed deliveries will appear here</p>
+
+                    <form method="POST" style="max-width: 600px;">
+                        <input type="hidden" name="update_profile" value="1">
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Association Name</label>
+                                <input type="text" class="form-control" value="<?php echo htmlspecialchars($association_data['association_name'] ?? ''); ?>" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Contact Person</label>
+                                <input type="text" name="contact_person" class="form-control" value="<?php echo htmlspecialchars($association_data['contact_person'] ?? ''); ?>" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Phone</label>
+                                <input type="tel" name="phone" class="form-control" value="<?php echo htmlspecialchars($association_data['phone'] ?? ''); ?>" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Region</label>
+                                <input type="text" name="region" class="form-control" value="<?php echo htmlspecialchars($association_data['region'] ?? ''); ?>" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">License Number</label>
+                                <input type="text" class="form-control" value="<?php echo htmlspecialchars($association_data['license_number'] ?? ''); ?>" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Number of Trucks</label>
+                                <input type="number" class="form-control" value="<?php echo htmlspecialchars($association_data['number_of_trucks'] ?? 0); ?>" readonly>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Update Profile
+                        </button>
+                    </form>
+                </div>
+
+            <?php elseif ($current_tab === 'reports'): ?>
+                <!-- Reports Tab -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Performance Reports</h3>
+                    </div>
+
+                    <!-- Performance Metrics Summary -->
+                    <div class="stats-grid" style="margin-bottom: 30px;">
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div class="stat-title">Total Service Requests</div>
+                                <div class="stat-icon">
+                                    <i class="fas fa-clipboard-list"></i>
+                                </div>
+                            </div>
+                            <div class="stat-value"><?php echo $performance_metrics['total_requests']; ?></div>
+                            <div class="stat-change">
+                                <i class="fas fa-calendar"></i> All time
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div class="stat-title">Completed Requests</div>
+                                <div class="stat-icon">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                            </div>
+                            <div class="stat-value"><?php echo $performance_metrics['completed_requests']; ?></div>
+                            <div class="stat-change">
+                                <i class="fas fa-trophy"></i> Successful deliveries
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div class="stat-title">Completion Rate</div>
+                                <div class="stat-icon">
+                                    <i class="fas fa-chart-line"></i>
+                                </div>
+                            </div>
+                            <div class="stat-value"><?php echo $performance_metrics['completion_rate']; ?>%</div>
+                            <div class="stat-change">
+                                <i class="fas fa-arrow-up"></i> Efficiency metric
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div class="stat-title">Active Trucks</div>
+                                <div class="stat-icon">
+                                    <i class="fas fa-truck"></i>
+                                </div>
+                            </div>
+                            <div class="stat-value"><?php echo $performance_metrics['active_trucks']; ?></div>
+                            <div class="stat-change">
+                                <i class="fas fa-cogs"></i> Operational fleet
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Completed Service Requests Report -->
+                    <div class="content-section" style="margin-top: 30px;">
+                        <div class="section-header">
+                            <h3 class="section-title">Completed Service Requests</h3>
+                        </div>
+
+                        <?php if (empty($completed_requests)): ?>
+                            <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                                <i class="fas fa-check-circle" style="font-size: 48px; margin-bottom: 20px;"></i>
+                                <p>No completed service requests yet.</p>
+                            </div>
+                        <?php else: ?>
+                            <div style="overflow-x: auto;">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Request ID</th>
+                                            <th>Shipper</th>
+                                            <th>Origin</th>
+                                            <th>Destination</th>
+                                            <th>Truck</th>
+                                            <th>Driver</th>
+                                            <th>Completed At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($completed_requests as $request): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($request['id']); ?></td>
+                                                <td><?php echo htmlspecialchars($request['shipper_company']); ?></td>
+                                                <td><?php echo htmlspecialchars($request['origin_city'] . ', ' . $request['origin_country']); ?></td>
+                                                <td><?php echo htmlspecialchars($request['destination_city'] . ', ' . $request['destination_country']); ?></td>
+                                                <td><?php echo htmlspecialchars($request['truck_plate'] ?? 'N/A'); ?></td>
+                                                <td><?php echo htmlspecialchars($request['driver_name'] ?? 'N/A'); ?></td>
+                                                <td><?php echo htmlspecialchars(date('M d, Y H:i', strtotime($request['updated_at']))); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Invoice Summary Report -->
+                    <div class="content-section" style="margin-top: 30px;">
+                        <div class="section-header">
+                            <h3 class="section-title">Invoice Summary</h3>
+                        </div>
+
+                        <?php
+                        // Calculate invoice totals
+                        $total_invoiced = 0;
+                        $paid_invoices = 0;
+                        $pending_invoices = 0;
+                        foreach ($invoices as $invoice) {
+                            $total_invoiced += $invoice['amount'] ?? 0;
+                            if (strtolower($invoice['status'] ?? '') === 'paid') {
+                                $paid_invoices += $invoice['amount'] ?? 0;
+                            } else {
+                                $pending_invoices += $invoice['amount'] ?? 0;
+                            }
+                        }
+                        ?>
+
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-header">
+                                    <div class="stat-title">Total Invoiced</div>
+                                    <div class="stat-icon">
+                                        <i class="fas fa-dollar-sign"></i>
+                                    </div>
+                                </div>
+                                <div class="stat-value">$<?php echo number_format($total_invoiced, 2); ?></div>
+                                <div class="stat-change">
+                                    <i class="fas fa-receipt"></i> All invoices
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-header">
+                                    <div class="stat-title">Paid Amount</div>
+                                    <div class="stat-icon">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                </div>
+                                <div class="stat-value">$<?php echo number_format($paid_invoices, 2); ?></div>
+                                <div class="stat-change">
+                                    <i class="fas fa-money-bill-wave"></i> Received
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-header">
+                                    <div class="stat-title">Pending Amount</div>
+                                    <div class="stat-icon">
+                                        <i class="fas fa-clock"></i>
+                                    </div>
+                                </div>
+                                <div class="stat-value">$<?php echo number_format($pending_invoices, 2); ?></div>
+                                <div class="stat-change">
+                                    <i class="fas fa-hourglass-half"></i> Outstanding
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-header">
+                                    <div class="stat-title">Total Invoices</div>
+                                    <div class="stat-icon">
+                                        <i class="fas fa-file-invoice-dollar"></i>
+                                    </div>
+                                </div>
+                                <div class="stat-value"><?php echo count($invoices); ?></div>
+                                <div class="stat-change">
+                                    <i class="fas fa-list"></i> Generated
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            <?php elseif ($current_tab === 'invoices'): ?>
+                <!-- Invoices Tab -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Invoices</h3>
+                    </div>
+
+                    <?php if (empty($invoices)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-file-invoice-dollar" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No invoices found.</p>
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive">
+                        <div style="overflow-x: auto;">
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Request ID</th>
-                                        <th>Route</th>
-                                        <th>Cargo</th>
-                                        <th>Truck</th>
-                                        <th>Driver</th>
-                                        <th>Completed Date</th>
+                                        <th>Invoice ID</th>
+                                        <th>Amount</th>
+                                        <th>Status</th>
+                                        <th>Created At</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($completed_requests as $request): ?>
+                                    <?php foreach ($invoices as $invoice): ?>
                                         <tr>
-                                            <td>#<?php echo $request['id']; ?></td>
-                                            <td><?php echo htmlspecialchars($request['origin']); ?> → <?php echo htmlspecialchars($request['destination']); ?></td>
-                                            <td><?php echo htmlspecialchars($request['cargo_description']); ?> (<?php echo htmlspecialchars($request['cargo_weight']); ?> tons)</td>
-                                            <td><?php echo htmlspecialchars($request['truck_plate'] ?? 'Not assigned'); ?></td>
-                                            <td><?php echo htmlspecialchars($request['driver_name'] ?? 'Not assigned'); ?></td>
-                                            <td><?php echo date('M j, Y', strtotime($request['updated_at'] ?? $request['created_at'])); ?></td>
+                                            <td><?php echo htmlspecialchars($invoice['id']); ?></td>
+                                            <td>$<?php echo htmlspecialchars(number_format($invoice['amount'] ?? 0, 2)); ?></td>
+                                            <td>
+                                                <span class="status-badge status-<?php echo strtolower($invoice['status'] ?? 'pending'); ?>">
+                                                    <?php echo htmlspecialchars($invoice['status'] ?? 'Pending'); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo htmlspecialchars(date('M d, Y', strtotime($invoice['created_at']))); ?></td>
+                                            <td>
+                                                <button class="btn btn-primary btn-sm" onclick="viewInvoice(<?php echo $invoice['id']; ?>)">
+                                                    <i class="fas fa-eye"></i> View
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -2233,397 +2246,199 @@ try {
                         </div>
                     <?php endif; ?>
                 </div>
-            </div>
-        </div>
+            <?php endif; ?>
+        </main>
     </div>
 
     <!-- Modals -->
-    
-    <!-- Edit Profile Modal -->
-    <div class="modal" id="editProfileModal">
+    <!-- Truck Registration Modal -->
+    <div class="modal" id="truck-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Edit Association Profile</h3>
-                <button class="modal-close" onclick="closeModal('editProfileModal')">&times;</button>
+                <h3 class="modal-title">Register New Truck</h3>
+                <button class="modal-close" onclick="closeModal('truck-modal')">&times;</button>
             </div>
-            <div class="modal-body">
-                <form method="POST" action="">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Contact Person</label>
-                            <input type="text" class="form-control" name="contact_person" value="<?php echo htmlspecialchars($association_data['contact_person'] ?? ''); ?>" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Phone</label>
-                            <input type="tel" class="form-control" name="phone" value="<?php echo htmlspecialchars($association_data['phone'] ?? ''); ?>" required>
-                        </div>
+            <form method="POST">
+                <input type="hidden" name="register_truck" value="1">
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Plate Number</label>
+                        <input type="text" name="plate_number" class="form-control" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Region</label>
-                        <select class="form-control" name="region" required>
-                            <option value="">Select Region</option>
-                            <option value="Addis Ababa" <?php echo ($association_data['region'] ?? '') === 'Addis Ababa' ? 'selected' : ''; ?>>Addis Ababa</option>
-                            <option value="Afar" <?php echo ($association_data['region'] ?? '') === 'Afar' ? 'selected' : ''; ?>>Afar</option>
-                            <option value="Amhara" <?php echo ($association_data['region'] ?? '') === 'Amhara' ? 'selected' : ''; ?>>Amhara</option>
-                            <option value="Benishangul-Gumuz" <?php echo ($association_data['region'] ?? '') === 'Benishangul-Gumuz' ? 'selected' : ''; ?>>Benishangul-Gumuz</option>
-                            <option value="Dire Dawa" <?php echo ($association_data['region'] ?? '') === 'Dire Dawa' ? 'selected' : ''; ?>>Dire Dawa</option>
-                            <option value="Gambela" <?php echo ($association_data['region'] ?? '') === 'Gambela' ? 'selected' : ''; ?>>Gambela</option>
-                            <option value="Harari" <?php echo ($association_data['region'] ?? '') === 'Harari' ? 'selected' : ''; ?>>Harari</option>
-                            <option value="Oromia" <?php echo ($association_data['region'] ?? '') === 'Oromia' ? 'selected' : ''; ?>>Oromia</option>
-                            <option value="Sidama" <?php echo ($association_data['region'] ?? '') === 'Sidama' ? 'selected' : ''; ?>>Sidama</option>
-                            <option value="Somali" <?php echo ($association_data['region'] ?? '') === 'Somali' ? 'selected' : ''; ?>>Somali</option>
-                            <option value="Southern Nations" <?php echo ($association_data['region'] ?? '') === 'Southern Nations' ? 'selected' : ''; ?>>Southern Nations</option>
-                            <option value="Tigray" <?php echo ($association_data['region'] ?? '') === 'Tigray' ? 'selected' : ''; ?>>Tigray</option>
+                        <label class="form-label">Truck Type</label>
+                        <select name="truck_type" class="form-control" required>
+                            <option value="">Select Type</option>
+                            <option value="Flatbed">Flatbed</option>
+                            <option value="Refrigerated">Refrigerated</option>
+                            <option value="Tanker">Tanker</option>
+                            <option value="Box Truck">Box Truck</option>
+                            <option value="Dump Truck">Dump Truck</option>
                         </select>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('editProfileModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="update_profile">Save Changes</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+                </div>
 
-    <!-- Add Truck Modal -->
-    <div class="modal" id="addTruckModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Register New Truck</h3>
-                <button class="modal-close" onclick="closeModal('addTruckModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST" action="">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Plate Number</label>
-                            <input type="text" class="form-control" name="plate_number" placeholder="e.g., 3-AAA-1234" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Truck Type</label>
-                            <select class="form-control" name="truck_type" required>
-                                <option value="">Select Type</option>
-                                <option value="flatbed">Flatbed</option>
-                                <option value="refrigerated">Refrigerated</option>
-                                <option value="container">Container</option>
-                                <option value="tanker">Tanker</option>
-                                <option value="dump">Dump Truck</option>
-                                <option value="box">Box Truck</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Capacity (tons)</label>
-                            <input type="number" class="form-control" name="capacity" step="0.1" min="1" max="50" placeholder="e.g., 10.5" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Assign Driver (Optional)</label>
-                            <select class="form-control" name="driver_id">
-                                <option value="">Select Driver</option>
-                                <?php foreach ($available_drivers as $driver): ?>
-                                    <option value="<?php echo $driver['id']; ?>"><?php echo htmlspecialchars($driver['full_name']); ?> (<?php echo htmlspecialchars($driver['license_number']); ?>)</option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('addTruckModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="register_truck">Register Truck</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Add Driver Modal -->
-    <div class="modal" id="addDriverModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Register New Driver</h3>
-                <button class="modal-close" onclick="closeModal('addDriverModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST" action="">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Full Name</label>
-                            <input type="text" class="form-control" name="full_name" placeholder="e.g., Alemayehu Kebede" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">License Number</label>
-                            <input type="text" class="form-control" name="license_number" placeholder="e.g., ET123456789" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Phone Number</label>
-                            <input type="tel" class="form-control" name="phone" placeholder="e.g., +251911223344" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Experience (Years)</label>
-                            <input type="number" class="form-control" name="experience_years" min="0" max="50" value="0" required>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('addDriverModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="register_driver">Register Driver</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Assign Driver Modal -->
-    <div class="modal" id="assignDriverModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Assign Driver to Truck</h3>
-                <button class="modal-close" onclick="closeModal('assignDriverModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form method="POST" action="" id="assignDriverForm">
-                    <input type="hidden" name="truck_id" id="assignTruckId">
+                <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Select Driver</label>
-                        <select class="form-control" name="driver_id" required>
-                            <option value="">Select Driver</option>
+                        <label class="form-label">Capacity (tons)</label>
+                        <input type="number" name="capacity" step="0.1" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Assign Driver (Optional)</label>
+                        <select name="driver_id" class="form-control">
+                            <option value="">No driver assigned</option>
                             <?php foreach ($available_drivers as $driver): ?>
-                                <option value="<?php echo $driver['id']; ?>"><?php echo htmlspecialchars($driver['full_name']); ?> (<?php echo htmlspecialchars($driver['license_number']); ?>) - Available</option>
+                                <option value="<?php echo $driver['id']; ?>"><?php echo htmlspecialchars($driver['full_name']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('assignDriverModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="assign_driver">Assign Driver</button>
-                    </div>
-                </form>
-            </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('truck-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Register Truck</button>
+                </div>
+            </form>
         </div>
     </div>
 
-    <!-- Accept Service Request Modal -->
-    <div class="modal" id="acceptRequestModal">
+    <!-- Driver Assignment Modal -->
+    <div class="modal" id="driver-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Accept Service Request</h3>
-                <button class="modal-close" onclick="closeModal('acceptRequestModal')">&times;</button>
+                <h3 class="modal-title">Assign Driver to Truck</h3>
+                <button class="modal-close" onclick="closeModal('driver-modal')">&times;</button>
             </div>
-            <div class="modal-body">
-                <form method="POST" action="" id="acceptRequestForm">
-                    <input type="hidden" name="service_request_id" id="serviceRequestId">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Select Truck</label>
-                            <select class="form-control" name="truck_id" required>
-                                <option value="">Select Truck</option>
-                                <?php foreach ($available_trucks as $truck): ?>
-                                    <option value="<?php echo $truck['id']; ?>"><?php echo htmlspecialchars($truck['plate_number']); ?> - <?php echo htmlspecialchars($truck['truck_type']); ?> (<?php echo htmlspecialchars($truck['capacity']); ?> tons)</option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Select Driver</label>
-                            <select class="form-control" name="driver_id" required>
-                                <option value="">Select Driver</option>
-                                <?php foreach ($available_drivers as $driver): ?>
-                                    <option value="<?php echo $driver['id']; ?>"><?php echo htmlspecialchars($driver['full_name']); ?> (<?php echo htmlspecialchars($driver['license_number']); ?>)</option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('acceptRequestModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="accept_service_request">Accept Request</button>
-                    </div>
-                </form>
-            </div>
+            <form method="POST" id="driver-assignment-form">
+                <input type="hidden" name="assign_driver" value="1">
+                <input type="hidden" name="truck_id" id="assign-truck-id" value="">
+
+                <div class="form-group">
+                    <label class="form-label">Select Driver</label>
+                    <select name="driver_id" class="form-control" required>
+                        <option value="">Choose a driver</option>
+                        <?php foreach ($available_drivers as $driver): ?>
+                            <option value="<?php echo $driver['id']; ?>"><?php echo htmlspecialchars($driver['full_name']); ?> (<?php echo htmlspecialchars($driver['license_number']); ?>)</option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('driver-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Assign Driver</button>
+                </div>
+            </form>
         </div>
     </div>
 
-    <!-- Update Delivery Status Modal -->
-    <div class="modal" id="updateStatusModal">
+    <!-- Status Update Modal -->
+    <div class="modal" id="status-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Update Delivery Status</h3>
-                <button class="modal-close" onclick="closeModal('updateStatusModal')">&times;</button>
+                <h3 class="modal-title">Update Delivery Status</h3>
+                <button class="modal-close" onclick="closeModal('status-modal')">&times;</button>
             </div>
-            <div class="modal-body">
-                <form method="POST" action="" id="updateStatusForm">
-                    <input type="hidden" name="service_request_id" id="statusRequestId">
-                    <div class="form-group">
-                        <label class="form-label">Delivery Status</label>
-                        <select class="form-control" name="delivery_status" required>
-                            <option value="accepted">Accepted</option>
-                            <option value="in transit">In Transit</option>
-                            <option value="delivered">Delivered</option>
-                        </select>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('updateStatusModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary" name="update_delivery_status">Update Status</button>
-                    </div>
-                </form>
-            </div>
+            <form method="POST" id="status-update-form">
+                <input type="hidden" name="update_delivery_status" value="1">
+                <input type="hidden" name="service_request_id" id="status-request-id" value="">
+
+                <div class="form-group">
+                    <label class="form-label">Delivery Status</label>
+                    <select name="delivery_status" class="form-control" required>
+                        <option value="accepted">Accepted</option>
+                        <option value="in transit">In Transit</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('status-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Status</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <script>
-        // Mobile menu toggle
-        document.querySelector('.mobile-menu-toggle').addEventListener('click', function() {
-            document.querySelector('.sidebar').classList.toggle('active');
+        // Mobile menu functionality
+        const menuToggle = document.getElementById('menuToggle');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+        menuToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('mobile-open');
+            sidebarOverlay.classList.toggle('show');
         });
 
-        // Notification dropdown
-        document.getElementById('notificationToggle').addEventListener('click', function(e) {
-            e.stopPropagation();
-            document.getElementById('notificationDropdown').classList.toggle('show');
-            document.getElementById('messageDropdown').classList.remove('show');
-            document.getElementById('userDropdown').classList.remove('show');
+        sidebarOverlay.addEventListener('click', function() {
+            sidebar.classList.remove('mobile-open');
+            sidebarOverlay.classList.remove('show');
         });
 
-        // Message dropdown
-        document.getElementById('messageToggle').addEventListener('click', function(e) {
-            e.stopPropagation();
-            document.getElementById('messageDropdown').classList.toggle('show');
-            document.getElementById('notificationDropdown').classList.remove('show');
-            document.getElementById('userDropdown').classList.remove('show');
-        });
-
-        // User menu dropdown
-        document.getElementById('userMenuToggle').addEventListener('click', function(e) {
-            e.stopPropagation();
-            document.getElementById('userDropdown').classList.toggle('show');
-            document.getElementById('notificationDropdown').classList.remove('show');
-            document.getElementById('messageDropdown').classList.remove('show');
-        });
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function() {
-            document.getElementById('notificationDropdown').classList.remove('show');
-            document.getElementById('messageDropdown').classList.remove('show');
-            document.getElementById('userDropdown').classList.remove('show');
+        // Close sidebar when clicking on a link (for mobile)
+        const sidebarLinks = document.querySelectorAll('.sidebar-nav a');
+        sidebarLinks.forEach(link => {
+            link.addEventListener('click', function() {
+                sidebar.classList.remove('mobile-open');
+                sidebarOverlay.classList.remove('show');
+            });
         });
 
         // Modal functions
-        function openModal(modalId) {
-            document.getElementById(modalId).classList.add('show');
+        function showTruckModal() {
+            document.getElementById('truck-modal').classList.add('show');
         }
 
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
 
-        // Close modal when clicking outside
-        window.addEventListener('click', function(event) {
-            const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => {
-                if (event.target === modal) {
-                    modal.classList.remove('show');
-                }
-            });
-        });
-
-        // Driver assignment functions
-        function assignDriverToTruck(truckId) {
-            document.getElementById('assignTruckId').value = truckId;
-            openModal('assignDriverModal');
+        function assignDriver(truckId) {
+            document.getElementById('assign-truck-id').value = truckId;
+            document.getElementById('driver-modal').classList.add('show');
         }
 
-        function assignDriver(driverId) {
-            // This could be enhanced to show available trucks for this driver
-            alert('Select a truck to assign this driver to');
+        function updateStatus(requestId) {
+            document.getElementById('status-request-id').value = requestId;
+            document.getElementById('status-modal').classList.add('show');
         }
 
-        // Service request functions
-        function acceptServiceRequest(requestId) {
-            document.getElementById('serviceRequestId').value = requestId;
-            openModal('acceptRequestModal');
-        }
-
-        function viewRequestDetails(requestId) {
-            alert('Viewing details for request #' + requestId);
-            // In a real implementation, this would show a detailed view of the request
-        }
-
-        function updateDeliveryStatus(requestId) {
-            document.getElementById('statusRequestId').value = requestId;
-            openModal('updateStatusModal');
-        }
-
-        // Tab functionality
-        function openTab(evt, tabName) {
-            const tabcontent = document.getElementsByClassName("tab-content");
-            for (let i = 0; i < tabcontent.length; i++) {
-                tabcontent[i].classList.remove("active");
+        function acceptRequest(requestId) {
+            if (confirm('Are you sure you want to accept this service request? You will need to assign a truck and driver.')) {
+                // Create a form to submit the acceptance
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.innerHTML = `
+                    <input type="hidden" name="accept_service_request" value="1">
+                    <input type="hidden" name="service_request_id" value="${requestId}">
+                    <input type="hidden" name="truck_id" value="">
+                    <input type="hidden" name="driver_id" value="">
+                `;
+                document.body.appendChild(form);
+                form.submit();
             }
-            
-            const tablinks = document.getElementsByClassName("tab");
-            for (let i = 0; i < tablinks.length; i++) {
-                tablinks[i].classList.remove("active");
-            }
-            
-            document.getElementById(tabName).classList.add("active");
-            evt.currentTarget.classList.add("active");
         }
 
-        // Smooth scrolling for sidebar navigation
-        document.querySelectorAll('.sidebar-nav a').forEach(anchor => {
-            anchor.addEventListener('click', function(e) {
-                e.preventDefault();
-                
-                const targetId = this.getAttribute('href').substring(1);
-                const targetElement = document.getElementById(targetId);
-                
-                if (targetElement) {
-                    window.scrollTo({
-                        top: targetElement.offsetTop - 100,
-                        behavior: 'smooth'
-                    });
-                    
-                    // Close mobile menu if open
-                    document.querySelector('.sidebar').classList.remove('active');
-                }
-            });
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.classList.remove('show');
+            }
+        }
+
+        // Global search functionality
+        document.getElementById('global-search').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            // Implement search functionality based on current tab
+            console.log('Searching for:', searchTerm);
         });
 
-        // Handle mark all notifications as read
-        document.getElementById('markAllReadBtn').addEventListener('click', function(e) {
-            e.preventDefault();
-
-            // Create a form to submit POST request
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = window.location.href;
-
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'mark_all_read';
-            input.value = '1';
-
-            form.appendChild(input);
-            document.body.appendChild(form);
-            form.submit();
-        });
-
-        // Auto-refresh notifications every 30 seconds
+        // Auto-refresh notifications count (optional)
         setInterval(function() {
-            // In a real implementation, this would fetch new notifications via AJAX
-            console.log('Checking for new notifications...');
-        }, 30000);
-
-        // Initialize the first tab as active
-        document.addEventListener('DOMContentLoaded', function() {
-            const firstTab = document.querySelector('.tab');
-            if (firstTab) {
-                firstTab.classList.add('active');
-            }
-            
-            const firstTabContent = document.querySelector('.tab-content');
-            if (firstTabContent) {
-                firstTabContent.classList.add('active');
-            }
-        });
+            // Could implement AJAX to refresh notification counts
+        }, 30000); // Every 30 seconds
     </script>
 </body>
 </html>

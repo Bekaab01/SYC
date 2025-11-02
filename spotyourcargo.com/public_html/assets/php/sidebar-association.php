@@ -20,7 +20,7 @@
                 <li><a href="?tab=matching" class="<?php echo $current_tab == 'matching' ? 'active' : ''; ?>"><i class="fas fa-heart"></i> Smart Matching</a></li>
                 <li><a href="?tab=active-requests" class="<?php echo $current_tab == 'active-requests' ? 'active' : ''; ?>"><i class="fas fa-ship"></i> Active Requests</a></li>
                 <li><a href="?tab=reports" class="<?php echo $current_tab == 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-line"></i> Reports</a></li>
-                <li><a href="?tab=settings" class="<?php echo $current_tab == 'settings' ? 'active' : ''; ?>"><i class="fas fa-cog"></i> Settings</a></li>
+                <li><a href="?tab=profile" class="<?php echo $current_tab == 'profile' ? 'active' : ''; ?>"><i class="fas fa-user"></i> Profile</a></li>
             </ul>
         </nav>
     </div>

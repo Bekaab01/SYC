@@ -118,8 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_registration
             // Begin transaction
             $pdo->beginTransaction();
 
-            // Generate SYC association ID
-            $syc_id = 'SYC-A-' . str_pad($user_id, 4, '0', STR_PAD_LEFT);
+            // Use the SYC ID from users table (already generated during signup)
+            $syc_id = $user_data['syc_id'];
 
             // Initialize association data
             $association_data = [
