@@ -536,7 +536,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['shipment_document'])
                     error_log("Document upload DB error: " . $e->getMessage());
                     $upload_error = "Error saving document metadata.";
                     // Clean up uploaded file
-                    unlink($file_path);
+                    if (file_exists($file_path)) unlink($file_path);
                 }
             } else {
                 $upload_error = "Failed to move uploaded file.";
@@ -1454,7 +1454,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_quote'])) {
             <!-- Welcome Banner -->
             <div class="welcome-banner">
                 <div class="welcome-text">
-                    <h2>Welcome back, <?php echo htmlspecialchars($welcome_name); ?>!</h2>
+                    <h2>Welcome, <?php echo htmlspecialchars($welcome_name); ?>!</h2>
                     <p>Manage your shipments, quotes, and carrier relationships from your transitor dashboard.</p>
                 </div>
                 <button class="banner-cta" onclick="showQuoteModal()">

@@ -5,13 +5,9 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// DEBUG: Environment detection
+// Environment detection
 $host = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalhost = $host === 'localhost' || preg_match('/\.local$/i', $host);
-error_log("DEBUG: HTTP_HOST = '$host', isLocalhost = " . ($isLocalhost ? 'true' : 'false'));
-echo "<!-- DEBUG: HTTP_HOST = '$host', isLocalhost = " . ($isLocalhost ? 'true' : 'false') . " -->";
-
-error_log("DEBUG: access.php started - " . date('Y-m-d H:i:s'));
 
 // Bootstrap sessions and DB with unified include paths working on localhost and live
 require_once __DIR__ . '/../private/session_config.php';
@@ -25,15 +21,12 @@ if (session_status() === PHP_SESSION_NONE) {
 ob_start();
 
 // Centralized PDO connection (uses private/.env or falls back to private/db.php)
-error_log("DEBUG: About to require db.php");
 require_once __DIR__ . '/../private/db.php';
-error_log("DEBUG: db.php loaded successfully");
 
 if (!isset($pdo) || !($pdo instanceof PDO)) {
     error_log("ERROR: PDO connection failed - pdo is not set or not PDO instance");
     die('Database connection failed. Please contact administrator.');
 }
-error_log("DEBUG: PDO connection successful");
 
 // Define dynamic app URL for emails and links
 $appUrl = getenv('APP_URL');
@@ -84,20 +77,14 @@ function generateSYCID($user_type, $pdo) {
     return $prefix . str_pad($new_number, 4, '0', STR_PAD_LEFT);
 }
 
-error_log("DEBUG: About to check/load BrevoSimpleEmail class");
 if (!class_exists('BrevoSimpleEmail')) {
-    error_log("DEBUG: BrevoSimpleEmail class not found, including brevo_simple.php");
     include_once __DIR__ . '/../private/brevo_simple.php';
-    error_log("DEBUG: brevo_simple.php included successfully");
-} else {
-    error_log("DEBUG: BrevoSimpleEmail class already exists");
 }
 
 // function to handle login emails
 function sendLoginEmail($user) {
     try {
-        // Debug: Log that we're attempting to send email
-        error_log("DEBUG: sendLoginEmail called for user: " . $user['email']);
+
 
         if (!class_exists('BrevoSimpleEmail')) {
             error_log("ERROR: BrevoSimpleEmail class not found after include");
@@ -384,8 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['signup'])) {
         } else {
             // Generate unique SYC ID and hash password
             $syc_id = generateSYCID($user_type, $pdo);
-            // DEBUG: Log the generated SYC ID
-            error_log("DEBUG: Generated SYC ID for user_type '{$user_type}': {$syc_id}");
+
 
             $password_hash = password_hash($password, PASSWORD_DEFAULT);
             $created_at = date('Y-m-d H:i:s');

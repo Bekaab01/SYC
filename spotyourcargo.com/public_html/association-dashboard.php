@@ -10,7 +10,7 @@ include_once __DIR__ . '/../private/db.php';
 
 // Handle tab parameter
 $allowed_tabs = [
-    'dashboard','requests','invoices','registered-trucks',
+    'dashboard','requests','drivers','registered-trucks',
     'available-carriers','matching','active-requests','reports','profile'
 ];
 $current_tab = $_GET['tab'] ?? 'dashboard';
@@ -68,6 +68,17 @@ try {
             // Association was rejected, redirect to pending approval page to show status
             header('Location: association-pending-approval.php');
             exit();
+        } elseif ($existing_association['registration_status'] === 'approved') {
+            // Check if all documents are approved
+            $doc_check_stmt = $pdo->prepare("SELECT COUNT(*) as total_docs, SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_docs FROM association_documents WHERE association_id = ?");
+            $doc_check_stmt->execute([$existing_association['id']]);
+            $doc_status = $doc_check_stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($doc_status['total_docs'] == 0 || $doc_status['approved_docs'] != $doc_status['total_docs']) {
+                // Not all documents are approved, redirect to pending approval page
+                header('Location: association-pending-approval.php');
+                exit();
+            }
         }
     }
 } catch (PDOException $e) {
@@ -197,40 +208,68 @@ if ($association_data && $user_syc_id) {
     }
 }
 
-// Handle truck registration
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register_truck'])) {
     $plate_number = $_POST['plate_number'] ?? '';
     $truck_type = $_POST['truck_type'] ?? '';
     $capacity = $_POST['capacity'] ?? '';
     $driver_id = $_POST['driver_id'] ?? null;
+
+    // Convert empty driver_id to NULL to avoid foreign key violation
+    if (empty($driver_id) || !is_numeric($driver_id)) {
+        $driver_id = null;
+    }
+
     $status = 'active';
 
     if ($association_id) {
         try {
-            $stmt = $pdo->prepare("
-                INSERT INTO association_trucks (association_id, plate_number, truck_type, capacity, driver_id, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, NOW())
-            ");
-            $stmt->execute([$association_id, $plate_number, $truck_type, $capacity, $driver_id, $status]);
+            $temp_error = "";
+            if ($driver_id) {
+                $check_driver = $pdo->prepare("SELECT id FROM drivers WHERE id = ? AND association_id = ? AND status = 'available'");
+                $check_driver->execute([$driver_id, $association_id]);
+                if (!$check_driver->fetch()) {
+                    $temp_error = "Selected driver is not available or does not exist.";
+                } else {
+                    // Unassign driver from any other truck
+                    $unassign_stmt = $pdo->prepare("UPDATE association_trucks SET driver_id = NULL WHERE driver_id = ? AND association_id = ?");
+                    $unassign_stmt->execute([$driver_id, $association_id]);
+                }
+            }
 
-            if ($stmt->rowCount() > 0) {
-                $success_message = "Truck registered successfully!";
-
-                // Update number of trucks in associations table
-                $update_truck_count = $pdo->prepare("
-                    UPDATE associations
-                    SET number_of_trucks = (SELECT COUNT(*) FROM association_trucks WHERE association_id = ?),
-                    updated_at = NOW()
-                    WHERE id = ?
+            if (empty($temp_error)) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO association_trucks (association_id, plate_number, truck_type, capacity, driver_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
                 ");
-                $update_truck_count->execute([$association_id, $association_id]);
+                $stmt->execute([$association_id, $plate_number, $truck_type, $capacity, $driver_id, $status]);
 
-                // Add notification for truck registration
-                $notification_message = "New truck registered: " . htmlspecialchars($plate_number) . " (" . htmlspecialchars($truck_type) . ")";
-                createNotification($pdo, $user_syc_id, $notification_message);
+                if ($stmt->rowCount() > 0) {
+                    if ($driver_id) {
+                        // Update driver status
+                        $update_driver = $pdo->prepare("UPDATE drivers SET status = 'assigned', updated_at = NOW() WHERE id = ?");
+                        $update_driver->execute([$driver_id]);
+                    }
 
+                    $success_message = "Truck registered successfully!";
+
+                    // Update number of trucks in associations table
+                    $update_truck_count = $pdo->prepare("
+                        UPDATE associations
+                        SET number_of_trucks = (SELECT COUNT(*) FROM association_trucks WHERE association_id = ? AND deleted_at IS NULL),
+                        updated_at = NOW()
+                        WHERE id = ?
+                    ");
+                    $update_truck_count->execute([$association_id, $association_id]);
+
+                    // Add notification for truck registration
+                    $notification_message = "New truck registered: " . htmlspecialchars($plate_number) . " (" . htmlspecialchars($truck_type) . ")";
+                    createNotification($pdo, $user_syc_id, $notification_message);
+
+                } else {
+                    $association_error = "Error registering truck. Please try again.";
+                }
             } else {
-                $association_error = "Error registering truck. Please try again.";
+                $association_error = $temp_error;
             }
         } catch (PDOException $e) {
             error_log("Truck registration error: " . $e->getMessage());
@@ -318,6 +357,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_driver'])) {
         }
     } else {
         $association_error = "Please select both a truck and a driver.";
+    }
+}
+
+// Handle driver unassignment from truck
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['unassign_driver'])) {
+    $driver_id = $_POST['driver_id'] ?? '';
+
+    if ($association_id && $driver_id) {
+        try {
+            // Unassign driver from truck
+            $unassign_stmt = $pdo->prepare("UPDATE association_trucks SET driver_id = NULL, updated_at = NOW() WHERE driver_id = ? AND association_id = ?");
+            $unassign_stmt->execute([$driver_id, $association_id]);
+
+            if ($unassign_stmt->rowCount() > 0) {
+                $success_message = "Driver unassigned from truck successfully!";
+
+                // Update driver status to available
+                $update_driver = $pdo->prepare("UPDATE drivers SET status = 'available', updated_at = NOW() WHERE id = ?");
+                $update_driver->execute([$driver_id]);
+
+                // Add notification
+                $driver_info = $pdo->prepare("SELECT full_name FROM drivers WHERE id = ?");
+                $driver_info->execute([$driver_id]);
+                $driver_data = $driver_info->fetch(PDO::FETCH_ASSOC);
+
+                $notification_message = "Driver " . htmlspecialchars($driver_data['full_name']) . " unassigned from truck";
+                createNotification($pdo, $user_syc_id, $notification_message);
+
+            } else {
+                $association_error = "Error unassigning driver from truck. Please try again.";
+            }
+        } catch (PDOException $e) {
+            error_log("Driver unassignment error: " . $e->getMessage());
+            $association_error = "Error unassigning driver: " . $e->getMessage();
+        }
+    } else {
+        $association_error = "Invalid driver selection.";
     }
 }
 
@@ -517,7 +593,7 @@ if ($association_id) {
             SELECT t.*, d.full_name as driver_name
             FROM association_trucks t
             LEFT JOIN drivers d ON t.driver_id = d.id
-            WHERE t.association_id = ?
+            WHERE t.association_id = ? AND t.deleted_at IS NULL
             ORDER BY t.created_at DESC
         ");
         $trucks_stmt->execute([$association_id]);
@@ -534,9 +610,11 @@ if ($association_id) {
 if ($association_id) {
     try {
         $drivers_stmt = $pdo->prepare("
-            SELECT * FROM drivers
-            WHERE association_id = ?
-            ORDER BY created_at DESC
+            SELECT d.*, t.plate_number as assigned_truck_plate
+            FROM drivers d
+            LEFT JOIN association_trucks t ON d.id = t.driver_id
+            WHERE d.association_id = ?
+            ORDER BY d.created_at DESC
         ");
         $drivers_stmt->execute([$association_id]);
         $drivers = $drivers_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -669,7 +747,19 @@ try {
 $invoices = [];
 if ($association_id) {
     try {
-        $invoices_stmt = $pdo->prepare("SELECT * FROM invoices WHERE association_id = ? ORDER BY created_at DESC");
+        $invoices_stmt = $pdo->prepare("
+            SELECT i.*,
+                   sr.origin_city, sr.origin_country, sr.destination_city, sr.destination_country,
+                   sr.cargo_description, sr.cargo_weight, sr.weight_unit,
+                   s.company_name as shipper_name,
+                   t.company_name as transitor_name
+            FROM invoices i
+            LEFT JOIN service_requests sr ON i.load_id = sr.id
+            LEFT JOIN shippers s ON sr.cargo_owner_id = s.id
+            LEFT JOIN transitors t ON sr.transitor_id = t.id
+            WHERE i.association_id = ?
+            ORDER BY i.created_at DESC
+        ");
         $invoices_stmt->execute([$association_id]);
         $invoices = $invoices_stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
@@ -1384,7 +1474,7 @@ if ($association_id) {
         /* Forms */
         .form-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin-bottom: 20px;
         }
@@ -1406,6 +1496,8 @@ if ($association_id) {
             border: 2px solid #e9ecef;
             border-radius: 8px;
             font-size: 14px;
+            max-width: 100%;
+            box-sizing: border-box;
             transition: var(--transition);
         }
 
@@ -1478,12 +1570,14 @@ if ($association_id) {
         .modal-content {
             background: white;
             border-radius: 15px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 90vh;
+            width: 60%;
+            max-width: 600px;
+            max-height: 80vh;
+            padding: 20px 30px;
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             animation: modalSlideIn 0.3s ease-out;
+            margin: 20px auto;
         }
 
         @keyframes modalSlideIn {
@@ -1573,6 +1667,9 @@ if ($association_id) {
                     <li><a href="?tab=dashboard" class="<?php echo $current_tab === 'dashboard' ? 'active' : ''; ?>"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
                     <li><a href="?tab=requests" class="<?php echo $current_tab === 'requests' ? 'active' : ''; ?>"><i class="fas fa-clipboard-list"></i> Service Requests</a></li>
                     <li><a href="?tab=registered-trucks" class="<?php echo $current_tab === 'registered-trucks' ? 'active' : ''; ?>"><i class="fas fa-truck"></i> Registered Trucks</a></li>
+                    <li><a href="?tab=drivers" class="<?php echo $current_tab === 'drivers' ? 'active' : ''; ?>"><i class="fas fa-users"></i> Drivers</a></li>
+                    <li><a href="?tab=available-carriers" class="<?php echo $current_tab === 'available-carriers' ? 'active' : ''; ?>"><i class="fas fa-truck-moving"></i> Available Carriers</a></li>
+                    <li><a href="?tab=matching" class="<?php echo $current_tab === 'matching' ? 'active' : ''; ?>"><i class="fas fa-handshake"></i> Matching</a></li>
                     <li><a href="?tab=active-requests" class="<?php echo $current_tab === 'active-requests' ? 'active' : ''; ?>"><i class="fas fa-tasks"></i> Active Requests</a></li>
                     <li><a href="?tab=reports" class="<?php echo $current_tab === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-bar"></i> Reports</a></li>
                     <li><a href="?tab=invoices" class="<?php echo $current_tab === 'invoices' ? 'active' : ''; ?>"><i class="fas fa-file-invoice-dollar"></i> Invoices</a></li>
@@ -1649,74 +1746,73 @@ if ($association_id) {
                 </div>
             <?php endif; ?>
 
-            <!-- Welcome Banner -->
-            <div class="welcome-banner">
-                <div class="welcome-text">
-                    <h2>Welcome back, <?php echo htmlspecialchars($welcome_name); ?>!</h2>
-                    <p>Manage your fleet, service requests, and operations from your association dashboard.</p>
-                </div>
-                <button class="banner-cta" onclick="showTruckModal()">
-                    <i class="fas fa-plus"></i> Register Truck
-                </button>
-            </div>
-
-            <!-- Stats Grid -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Total Trucks</div>
-                        <div class="stat-icon">
-                            <i class="fas fa-truck"></i>
-                        </div>
-                    </div>
-                    <div class="stat-value"><?php echo count($trucks); ?></div>
-                    <div class="stat-change">
-                        <i class="fas fa-arrow-up"></i> Registered
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Active Requests</div>
-                        <div class="stat-icon">
-                            <i class="fas fa-clipboard-list"></i>
-                        </div>
-                    </div>
-                    <div class="stat-value"><?php echo count($active_requests); ?></div>
-                    <div class="stat-change">
-                        <i class="fas fa-clock"></i> In progress
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Available Drivers</div>
-                        <div class="stat-icon">
-                            <i class="fas fa-users"></i>
-                        </div>
-                    </div>
-                    <div class="stat-value"><?php echo count($available_drivers); ?></div>
-                    <div class="stat-change">
-                        <i class="fas fa-check-circle"></i> Ready
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-title">Completion Rate</div>
-                        <div class="stat-icon">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                    </div>
-                    <div class="stat-value"><?php echo $performance_metrics['completion_rate']; ?>%</div>
-                    <div class="stat-change">
-                        <i class="fas fa-trophy"></i> This month
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab Content -->
             <?php if ($current_tab === 'dashboard'): ?>
+                <!-- Welcome Banner -->
+                <div class="welcome-banner">
+                    <div class="welcome-text">
+                        <h2>Welcome, <?php echo htmlspecialchars($welcome_name); ?>!</h2>
+                        <p>Manage your fleet, service requests, and operations from your association dashboard.</p>
+                    </div>
+                    <button class="banner-cta" onclick="showTruckModal()">
+                        <i class="fas fa-plus"></i> Register Truck
+                    </button>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-title">Total Trucks</div>
+                            <div class="stat-icon">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                        </div>
+                        <div class="stat-value"><?php echo count($trucks); ?></div>
+                        <div class="stat-change">
+                            <i class="fas fa-arrow-up"></i> Registered
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-title">Active Requests</div>
+                            <div class="stat-icon">
+                                <i class="fas fa-clipboard-list"></i>
+                            </div>
+                        </div>
+                        <div class="stat-value"><?php echo count($active_requests); ?></div>
+                        <div class="stat-change">
+                            <i class="fas fa-clock"></i> In progress
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-title">Available Drivers</div>
+                            <div class="stat-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                        </div>
+                        <div class="stat-value"><?php echo count($available_drivers); ?></div>
+                        <div class="stat-change">
+                            <i class="fas fa-check-circle"></i> Ready
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-title">Completion Rate</div>
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                        </div>
+                        <div class="stat-value"><?php echo $performance_metrics['completion_rate']; ?>%</div>
+                        <div class="stat-change">
+                            <i class="fas fa-trophy"></i> This month
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Recent Service Requests -->
                 <div class="content-section">
                     <div class="section-header">
@@ -1852,6 +1948,66 @@ if ($association_id) {
                                                 <button class="btn btn-success btn-sm" onclick="acceptRequest(<?php echo $request['id']; ?>)">
                                                     <i class="fas fa-check"></i> Accept
                                                 </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($current_tab === 'drivers'): ?>
+                <!-- Drivers Tab -->
+                <div class="content-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Drivers</h3>
+                        <button class="btn btn-primary" onclick="showDriverModal()">
+                            <i class="fas fa-plus"></i> Register New Driver
+                        </button>
+                    </div>
+
+                    <?php if (empty($drivers)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-users" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No drivers registered yet. Add your first driver to get started!</p>
+                        </div>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Full Name</th>
+                                        <th>License Number</th>
+                                        <th>Phone</th>
+                                        <th>Experience</th>
+                                        <th>Status</th>
+                                        <th>Assigned Truck</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($drivers as $driver): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($driver['full_name']); ?></td>
+                                            <td><?php echo htmlspecialchars($driver['license_number']); ?></td>
+                                            <td><?php echo htmlspecialchars($driver['phone']); ?></td>
+                                            <td><?php echo htmlspecialchars($driver['experience_years']); ?> years</td>
+                                            <td>
+                                                <span class="status-badge status-<?php echo strtolower($driver['status']); ?>">
+                                                    <?php echo htmlspecialchars($driver['status']); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($driver['assigned_truck_plate'] ?? 'Unassigned'); ?></td>
+                                            <td>
+                                                <button class="btn btn-secondary btn-sm" onclick="editDriver(<?php echo $driver['id']; ?>)">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <?php if ($driver['status'] === 'assigned'): ?>
+                                                    <button class="btn btn-warning btn-sm" onclick="unassignDriver(<?php echo $driver['id']; ?>)">
+                                                        <i class="fas fa-user-times"></i>
+                                                    </button>
+                                                <?php endif; ?>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -2246,6 +2402,132 @@ if ($association_id) {
                         </div>
                     <?php endif; ?>
                 </div>
+
+                <!-- Invoice Detail Modal -->
+                <div class="modal" id="invoice-modal" tabindex="-1" role="dialog" aria-labelledby="invoiceModalLabel" aria-hidden="true">
+                    <div class="modal-content" style="max-width: 900px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 20px;">
+                        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;">
+                            <h3 class="modal-title">Invoice Details</h3>
+                            <button class="modal-close" onclick="closeModal('invoice-modal')">&times;</button>
+                        </div>
+                        <div class="modal-body" id="invoice-detail-content" style="padding: 20px;">
+                            <!-- Invoice details will be rendered here dynamically -->
+                            <p>Loading invoice details...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    function closeModal(modalId) {
+                        const modal = document.getElementById(modalId);
+                        if (modal) modal.classList.remove('show');
+                    }
+
+                    function viewInvoice(invoiceId) {
+                        const modal = document.getElementById('invoice-modal');
+                        const content = document.getElementById('invoice-detail-content');
+                        if (!modal || !content) return;
+
+                        // Show loading text
+                        content.innerHTML = '<p>Loading invoice details...</p>';
+                        modal.classList.add('show');
+
+                        fetch('api/get_invoice.php?invoice_id=' + invoiceId)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                content.innerHTML = '<p style="color:red;">Error: ' + data.error + '</p>';
+                                return;
+                            }
+
+                            // Render invoice details based on data using invoice-template.html structure
+                            const html = `
+                                <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333;">
+                                    <h3>Invoice #${data.id}</h3>
+                                    <p><strong>Date:</strong> ${new Date(data.created_at).toLocaleDateString()}</p>
+                                    <p><strong>Status:</strong> ${data.status || 'Pending'}</p>
+                                    <h4>Billed To (Shipper)</h4>
+                                    <p><strong>Name:</strong> ${data.shipper_name || 'N/A'}</p>
+                                    <p><strong>Phone:</strong> ${data.shipper_phone || 'N/A'}</p>
+                                    <p><strong>Company:</strong> ${data.shipper_name || 'N/A'}</p>
+                                    <p><strong>Address:</strong> ${data.shipper_address || 'N/A'}</p>
+                                    <p><strong>Email:</strong> ${data.shipper_email || 'N/A'}</p>
+                                    <h4>Billing Breakdown</h4>
+                                    <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+                                        <thead>
+                                            <tr>
+                                                <th style="border: 1px solid #ccc; padding: 6px;">Description</th>
+                                                <th style="border: 1px solid #ccc; padding: 6px;">Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td style="border: 1px solid #ccc; padding: 6px;">Amount</td>
+                                                <td style="border: 1px solid #ccc; padding: 6px;">$${(data.amount || 0).toFixed(2)}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <h4>Related Load Details</h4>
+                                    <p><strong>Origin:</strong> ${data.origin_city || ''}${data.origin_city && data.origin_country ? ', ' : ''}${data.origin_country || ''}</p>
+                                    <p><strong>Destination:</strong> ${data.destination_city || ''}${data.destination_city && data.destination_country ? ', ' : ''}${data.destination_country || ''}</p>
+                                    <p><strong>Cargo Description:</strong> ${data.cargo_description || 'N/A'}</p>
+                                    <p><strong>Cargo Weight:</strong> ${(data.cargo_weight || 'N/A')} ${data.weight_unit || ''}</p>
+                                    <h4>Other Details</h4>
+                                    <p><strong>Transitor:</strong> ${data.transitor_name || 'N/A'}</p>
+                                    <p><em>Invoice created at: ${new Date(data.created_at).toLocaleString()}</em></p>
+                                </div>
+                            `;
+                            content.innerHTML = html;
+                        })
+                        .catch(err => {
+                            content.innerHTML = '<p style="color:red;">Error fetching invoice details.</p>';
+                            console.error(err);
+                        });
+                    }
+                </script>
+                        <h3 class="section-title">Invoices</h3>
+                    </div>
+
+                    <?php if (empty($invoices)): ?>
+                        <div style="text-align: center; padding: 40px; color: var(--text-light);">
+                            <i class="fas fa-file-invoice-dollar" style="font-size: 48px; margin-bottom: 20px;"></i>
+                            <p>No invoices found.</p>
+                        </div>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice ID</th>
+                                        <th>Amount</th>
+                                        <th>Status</th>
+                                        <th>Created At</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($invoices as $invoice): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($invoice['id']); ?></td>
+                                            <td>$<?php echo htmlspecialchars(number_format($invoice['amount'] ?? 0, 2)); ?></td>
+                                            <td>
+                                                <span class="status-badge status-<?php echo strtolower($invoice['status'] ?? 'pending'); ?>">
+                                                    <?php echo htmlspecialchars($invoice['status'] ?? 'Pending'); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo htmlspecialchars(date('M d, Y', strtotime($invoice['created_at']))); ?></td>
+                                            <td>
+                                                <button class="btn btn-primary btn-sm" onclick="viewInvoice(<?php echo $invoice['id']; ?>)">
+                                                    <i class="fas fa-eye"></i> View
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
         </main>
     </div>
@@ -2298,6 +2580,46 @@ if ($association_id) {
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('truck-modal')">Cancel</button>
                     <button type="submit" class="btn btn-primary">Register Truck</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Driver Registration Modal -->
+    <div class="modal" id="driver-registration-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Register New Driver</h3>
+                <button class="modal-close" onclick="closeModal('driver-registration-modal')">&times;</button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="register_driver" value="1">
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="full_name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">License Number</label>
+                        <input type="text" name="license_number" class="form-control" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Phone</label>
+                        <input type="tel" name="phone" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Experience (years)</label>
+                        <input type="number" name="experience_years" min="0" class="form-control" required>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('driver-registration-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Register Driver</button>
                 </div>
             </form>
         </div>
@@ -2391,6 +2713,10 @@ if ($association_id) {
             document.getElementById('truck-modal').classList.add('show');
         }
 
+        function showDriverModal() {
+            document.getElementById('driver-registration-modal').classList.add('show');
+        }
+
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
@@ -2419,6 +2745,25 @@ if ($association_id) {
                 document.body.appendChild(form);
                 form.submit();
             }
+        }
+
+        function unassignDriver(driverId) {
+            if (confirm('Are you sure you want to unassign this driver from their truck?')) {
+                // Create a form to submit the unassignment
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.innerHTML = `
+                    <input type="hidden" name="unassign_driver" value="1">
+                    <input type="hidden" name="driver_id" value="${driverId}">
+                `;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        function editDriver(driverId) {
+            // For now, just show an alert. Could be expanded to open an edit modal
+            alert('Edit driver functionality coming soon. Driver ID: ' + driverId);
         }
 
         // Close modals when clicking outside

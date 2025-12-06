@@ -1263,7 +1263,7 @@ if (isset($_GET['logout'])) {
             background: white;
             border-radius: 15px;
             width: 90%;
-            max-width: 500px;
+            max-width: 750px;
             max-height: 90vh;
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
@@ -2682,11 +2682,11 @@ if (isset($_GET['logout'])) {
     });
 
     // Truck Details Modal
-    function openTruckDetails(truck) {
+        function openTruckDetails(truck) {
         // Create modal HTML for truck details
         const modalHtml = `
             <div class="modal active" id="truck-details-modal">
-                <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-content" style="max-width: 750px;">
                     <div class="modal-header">
                         <h3>Truck Details</h3>
                         <button class="modal-close" onclick="closeModal('truck-details-modal')">&times;</button>
@@ -2763,14 +2763,14 @@ if (isset($_GET['logout'])) {
     }
 
     // Contact Carrier Function
-    function contactCarrier(truckId, carrierName) {
+        function contactCarrier(truckId, carrierName) {
         // Close any open modals first
         closeModal('truck-details-modal');
         
         // Create contact modal
         const modalHtml = `
             <div class="modal active" id="contact-carrier-modal">
-                <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-content" style="max-width: 700px;">
                     <div class="modal-header">
                         <h3>Contact ${carrierName}</h3>
                         <button class="modal-close" onclick="closeModal('contact-carrier-modal')">&times;</button>

@@ -46,7 +46,7 @@ if (!$association) {
     exit();
 }
 
-// Fetch association documents
+// Fetch association documents with status
 $documents_stmt = $pdo->prepare("SELECT * FROM association_documents WHERE association_id = ? ORDER BY uploaded_at DESC");
 $documents_stmt->execute([$association_id]);
 $documents = $documents_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -296,6 +296,68 @@ $log_stmt->execute([
         .document-card:hover {
             border-color: var(--primary-blue);
             background: white;
+        }
+
+        .document-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .status-indicator {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending { background: #fef3c7; color: #d97706; }
+        .status-approved { background: #d1fae5; color: #065f46; }
+        .status-rejected { background: #fee2e2; color: #dc2626; }
+
+        .document-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-approve {
+            background: var(--success-green);
+            color: white;
+        }
+
+        .btn-approve:hover {
+            background: #27ae60;
+        }
+
+        .btn-reject {
+            background: var(--danger-red);
+            color: white;
+        }
+
+        .btn-reject:hover {
+            background: #c0392b;
+        }
+
+        .rejection-reason {
+            margin-top: 8px;
+            padding: 8px;
+            background: #fef2f2;
+            border-left: 3px solid var(--danger-red);
+            border-radius: 4px;
+            font-size: 12px;
+            color: #dc2626;
         }
 
         .document-info {
@@ -667,13 +729,33 @@ $log_stmt->execute([
                                         <i class="fas fa-file-pdf"></i>
                                     </div>
                                     <div class="document-details">
+                                        <div class="document-status">
+                                            <span class="status-indicator status-<?php echo $doc['status'] ?? 'pending'; ?>">
+                                                <?php echo ucfirst($doc['status'] ?? 'pending'); ?>
+                                            </span>
+                                        </div>
                                         <h4><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $doc['document_type']))); ?></h4>
                                         <p><?php echo htmlspecialchars($doc['original_filename']); ?> • <?php echo date('M j, Y', strtotime($doc['uploaded_at'])); ?></p>
+                                        <?php if (!empty($doc['rejection_reason'])): ?>
+                                        <div class="rejection-reason">
+                                            <strong>Rejection Reason:</strong> <?php echo htmlspecialchars($doc['rejection_reason']); ?>
+                                        </div>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
-                                <a href="serve-file.php?id=<?php echo $doc['id']; ?>&type=association" class="document-action" target="_blank">
-                                    <i class="fas fa-eye"></i> View
-                                </a>
+                                <div class="document-actions">
+                                    <a href="serve-file.php?id=<?php echo $doc['id']; ?>&type=association" class="document-action" target="_blank">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <?php if (($doc['status'] ?? 'pending') === 'pending'): ?>
+                                    <button class="btn-small btn-approve" onclick="approveDocument(<?php echo $doc['id']; ?>)">
+                                        <i class="fas fa-check"></i> Approve
+                                    </button>
+                                    <button class="btn-small btn-reject" onclick="rejectDocument(<?php echo $doc['id']; ?>)">
+                                        <i class="fas fa-times"></i> Reject
+                                    </button>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                             <?php endforeach; ?>
                         </div>
@@ -803,6 +885,61 @@ $log_stmt->execute([
                 closeModal();
             }
         });
+
+        // Document approval/rejection functions
+        function approveDocument(documentId) {
+            if (confirm('Are you sure you want to approve this document?')) {
+                const formData = new FormData();
+                formData.append('document_id', documentId);
+                formData.append('action', 'approve_document');
+                formData.append('csrf_token', '<?php echo bin2hex(random_bytes(32)); ?>');
+
+                fetch('association_action.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || 'Failed to approve document'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while approving the document');
+                });
+            }
+        }
+
+        function rejectDocument(documentId) {
+            const reason = prompt('Please provide a reason for rejecting this document:');
+            if (reason !== null && reason.trim() !== '') {
+                const formData = new FormData();
+                formData.append('document_id', documentId);
+                formData.append('action', 'reject_document');
+                formData.append('rejection_reason', reason.trim());
+                formData.append('csrf_token', '<?php echo bin2hex(random_bytes(32)); ?>');
+
+                fetch('association_action.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || 'Failed to reject document'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while rejecting the document');
+                });
+            }
+        }
     </script>
 </body>
 </html>

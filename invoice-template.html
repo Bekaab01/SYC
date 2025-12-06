@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Invoice Template</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #fff;
+    margin: 0;
+    padding: 0 40px;
+    color: #333333;
+  }
+  .container {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 30px 40px;
+    border: 1px solid #ddd;
+    box-sizing: border-box;
+  }
+  .branding {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #ddd;
+  }
+  .branding img {
+    height: 36px;
+    width: auto;
+  }
+  .branding-text {
+    font-weight: 700;
+    color: #003366;
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+  .branding-text .dot {
+    color: #FFD700;
+  }
+  .section {
+    margin-top: 25px;
+  }
+  .section h3 {
+    margin-bottom: 10px;
+    font-weight: 600;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 4px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .label {
+    flex: 0 0 40%;
+    font-weight: 600;
+  }
+  .value {
+    flex: 1;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+  }
+  th, td {
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+  }
+  th {
+    background-color: #f7f7f7;
+  }
+  .optional {
+    font-style: italic;
+    color: #666;
+    margin-top: 20px;
+    font-size: 13px;
+  }
+  .qr-tracking {
+    margin-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .qr-placeholder {
+    width: 120px;
+    height: 120px;
+    border: 1px solid #999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #999;
+  }
+  .tracking-link {
+    font-size: 14px;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Branding -->
+  <div class="branding" style="justify-content: flex-start; gap: 30px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <img src="spotyourcargo.com/public_html/assets/img/SYC-Transparent.png" alt="SYC Logo" style="height: 36px; width: auto;"/>
+      <span style="font-weight: 700; color: #003366; font-size: 24px; letter-spacing: -0.5px;">SYC<span style="color: #FFD700;">.</span></span>
+    </div>
+    <div style="display: flex; flex-direction: column; justify-content: center;">
+      <span style="font-weight: 700; font-size: 20px; color: #003366;">Spot Your Cargo</span>
+      <span style="font-size: 14px; color: #333333;">Trusted Logistics Platform</span>
+    </div>
+  </div>
+
+  <!-- Invoice Header -->
+  <div class="section">
+    <h3>Invoice Details</h3>
+    <div class="row">
+      <div class="label">Invoice Number:</div>
+      <div class="value">{{invoiceNumber}}</div>
+    </div>
+    <div class="row">
+      <div class="label">Invoice Date:</div>
+      <div class="value">{{invoiceDate}}</div>
+    </div>
+    <div class="row">
+      <div class="label">Invoice Due Date:</div>
+      <div class="value">{{invoiceDueDate}}</div>
+    </div>
+    <div class="row">
+      <div class="label">Waybill Number:</div>
+      <div class="value">{{waybillNumber}}</div>
+    </div>
+    <div class="row">
+      <div class="label">Trip ID:</div>
+      <div class="value">{{tripId}}</div>
+    </div>
+  </div>
+
+  <!-- Billed To (Shipper) -->
+  <div class="section">
+    <h3>Billed To (Shipper)</h3>
+    <div class="row"><div class="label">Name:</div><div class="value">{{shipperName}}</div></div>
+    <div class="row"><div class="label">Phone:</div><div class="value">{{shipperPhone}}</div></div>
+    <div class="row"><div class="label">Company:</div><div class="value">{{shipperCompany}}</div></div>
+    <div class="row"><div class="label">Address:</div><div class="value">{{shipperAddress}}</div></div>
+    <div class="row"><div class="label">Email:</div><div class="value">{{shipperEmail}}</div></div>
+  </div>
+
+  <!-- Billing Breakdown -->
+  <div class="section">
+    <h3>Billing Breakdown</h3>
+    <table>
+      <tr><th>Description</th><th>Amount</th></tr>
+      <tr><td>Transport Price</td><td>{{transportPrice}}</td></tr>
+      <tr><td>Loading Price</td><td>{{loadingPrice}}</td></tr>
+      <tr><td>Other Charges</td><td>{{otherCharges}}</td></tr>
+      <tr><td>VAT Amount</td><td>{{vatAmount}}</td></tr>
+      <tr><td>Subtotal</td><td>{{subtotal}}</td></tr>
+      <tr><th>Grand Total</th><th>{{grandTotal}}</th></tr>
+    </table>
+  </div>
+
+  <!-- Payment Details -->
+  <div class="section">
+    <h3>Payment Details</h3>
+    <div class="row"><div class="label">Payment Method:</div><div class="value">{{paymentMethod}}</div></div>
+    <div class="row"><div class="label">Payment Status:</div><div class="value">{{paymentStatus}}</div></div>
+    <div class="row"><div class="label">Payment Reference:</div><div class="value">{{paymentReference}}</div></div>
+  </div>
+
+  <!-- Additional Invoice Notes -->
+  <div class="section">
+    <h3>Additional Invoice Notes</h3>
+    <div class="value">{{invoiceNote}}</div>
+  </div>
+
+  <!-- Optional placeholders -->
+  <div class="section optional">
+    <div>Created By: {{createdBy}}</div>
+    <div>Approved By: {{approvedBy}}</div>
+  </div>
+
+  <!-- QR Code and Tracking Link -->
+  <div class="qr-tracking">
+    <div class="qr-placeholder">{{qrCode}}</div>
+    <div class="tracking-link">Track your cargo: <a href="https://spotyourcargo.com/track/{{waybillNumber}}" target="_blank">{{trackingLink}}</a></div>
+  </div>
+
+</div>
+</body>
+</html>

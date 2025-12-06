@@ -4,8 +4,9 @@ ini_set('session.gc_maxlifetime', 864000); // 10 days in seconds
 ini_set('session.cookie_lifetime', 864000); // Make cookies persistent for 10 days
 session_start();
 
-// Include database connection
+// Include database connection and upload helper
 include_once __DIR__ . '/../private/db.php';
+include_once __DIR__ . '/upload_helper.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -19,6 +20,10 @@ if ($_SESSION['user_type'] !== 'association') {
     exit();
 }
 
+// Check if this is a reupload request
+$is_reupload = isset($_GET['reupload']) && $_GET['reupload'] == '1';
+$reupload_doc_type = $_GET['doc_type'] ?? null;
+
 // Check if association already completed registration
 $user_id = $_SESSION['user_id'];
 $association_check_stmt = $pdo->prepare("SELECT id, registration_status FROM associations WHERE user_id = ?");
@@ -26,17 +31,46 @@ $association_check_stmt->execute([$user_id]);
 $existing_association = $association_check_stmt->fetch(PDO::FETCH_ASSOC);
 
 if ($existing_association) {
-    // Check association status and redirect accordingly
-    if ($existing_association['registration_status'] === 'approved') {
-        // Association is approved, redirect to dashboard
-        header('Location: association-dashboard.php');
-        exit();
-    } elseif ($existing_association['registration_status'] === 'pending' || $existing_association['registration_status'] === 'manual_review') {
-        // Association is pending approval, redirect to pending approval page
+    if ($is_reupload && $reupload_doc_type) {
+        // Allow reupload even if association status is pending
+    } else {
+        // Check association status and redirect accordingly
+        if ($existing_association['registration_status'] === 'approved') {
+            // Association is approved, redirect to dashboard
+            header('Location: association-dashboard.php');
+            exit();
+        } elseif ($existing_association['registration_status'] === 'pending' || $existing_association['registration_status'] === 'manual_review') {
+            // Association is pending approval, redirect to pending approval page
+            header('Location: association-pending-approval.php');
+            exit();
+        } elseif ($existing_association['registration_status'] === 'rejected') {
+            // Association was rejected, redirect to pending approval page to show status
+            header('Location: association-pending-approval.php');
+            exit();
+        }
+    }
+}
+
+// Handle reupload mode
+if ($is_reupload && $reupload_doc_type) {
+    // Fetch existing association data for pre-filling
+    $association_stmt = $pdo->prepare("
+        SELECT a.*, u.email as user_email
+        FROM associations a
+        LEFT JOIN users u ON a.user_id = u.id
+        WHERE a.user_id = ?
+    ");
+    $association_stmt->execute([$user_id]);
+    $existing_association = $association_stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$existing_association) {
         header('Location: association-pending-approval.php');
         exit();
-    } elseif ($existing_association['registration_status'] === 'rejected') {
-        // Association was rejected, redirect to pending approval page to show status
+    }
+
+    // Validate that the document type is valid
+    $valid_doc_types = ['business_license', 'tin_certificate', 'association_membership'];
+    if (!in_array($reupload_doc_type, $valid_doc_types)) {
         header('Location: association-pending-approval.php');
         exit();
     }
@@ -57,138 +91,162 @@ $ethiopian_regions = [
     'Gambella', 'Harari', 'Oromia', 'Somali', 'Southern Nations, Nationalities, and Peoples\' Region (SNNPR)', 'Tigray'
 ];
 
-// Handle file uploads securely
-function handleFileUpload($file_input, $allowed_types = ['pdf', 'jpg', 'jpeg', 'png'], $max_size = 5242880) { // 5MB
-    if (!isset($_FILES[$file_input]) || $_FILES[$file_input]['error'] !== UPLOAD_ERR_OK) {
-        return null;
-    }
+// Handle file uploads securely using the new helper
 
-    $file = $_FILES[$file_input];
-    $file_name = basename($file['name']);
-    $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+// Handle association registration or reupload
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['complete_registration']) || isset($_POST['reupload_document']))) {
+    if (isset($_POST['reupload_document'])) {
+        // Handle document reupload
+        $doc_type = $_POST['doc_type'] ?? '';
+        $valid_doc_types = ['business_license', 'tin_certificate', 'association_membership'];
 
-    // Validate file type
-    if (!in_array($file_ext, $allowed_types)) {
-        return ['error' => 'Invalid file type. Allowed: ' . implode(', ', $allowed_types)];
-    }
+        if (!in_array($doc_type, $valid_doc_types)) {
+            $registration_error = 'Invalid document type.';
+        } else {
+            try {
+                // Get association ID
+                $association_stmt = $pdo->prepare("SELECT id FROM associations WHERE user_id = ?");
+                $association_stmt->execute([$user_id]);
+                $association = $association_stmt->fetch(PDO::FETCH_ASSOC);
 
-    // Validate file size
-    if ($file['size'] > $max_size) {
-        return ['error' => 'File too large. Maximum size: ' . ($max_size / 1024 / 1024) . 'MB'];
-    }
+                if (!$association) {
+                    $registration_error = 'Association not found.';
+                } else {
+                    $association_id = $association['id'];
+                    $syc_id = $user_data['syc_id'];
 
-    // Generate secure filename
-    $secure_name = uniqid('association_' . $file_input . '_', true) . '.' . $file_ext;
-    $upload_dir = __DIR__ . '/../private/uploads/associations/';
-    $upload_path = $upload_dir . $secure_name;
+                    // Handle file upload
+                    $uploaded_file = handleSecureFileUpload($doc_type, $syc_id);
 
-    // Create directory if it doesn't exist
-    if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0755, true);
-    }
+                    if (isset($uploaded_file['error'])) {
+                        $registration_error = ucfirst(str_replace('_', ' ', $doc_type)) . ': ' . $uploaded_file['error'];
+                    } else {
+                        // Delete existing document record
+                        $pdo->prepare("DELETE FROM association_documents WHERE association_id = ? AND document_type = ?")->execute([$association_id, $doc_type]);
 
-    // Move uploaded file
-    if (move_uploaded_file($file['tmp_name'], $upload_path)) {
-        return [
-            'path' => 'private/uploads/associations/' . $secure_name,
-            'original_name' => $file_name
-        ];
-    } else {
-        return ['error' => 'Failed to upload file'];
-    }
-}
+                        // Insert new document record
+                        $pdo->prepare("INSERT INTO association_documents (association_id, document_type, user_folder, stored_path, original_filename, mime_type, size, checksum, uploaded_at, uploaded_by_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")->execute([
+                            $association_id, $doc_type, $uploaded_file['user_folder'], $uploaded_file['stored_path'],
+                            $uploaded_file['original_name'], $uploaded_file['mime_type'], $uploaded_file['size'],
+                            $uploaded_file['checksum'], $uploaded_file['uploaded_at'], $uploaded_file['uploaded_by_ip']
+                        ]);
 
-// Handle association registration
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_registration'])) {
-    // Common validation
-    $association_name = trim($_POST['association_name'] ?? '');
-    $license_number = trim($_POST['license_number'] ?? '');
-    $region = trim($_POST['region'] ?? '');
-    $contact_person = trim($_POST['contact_person'] ?? '');
-    $contact_phone = trim($_POST['contact_phone'] ?? '');
-    $association_email = trim($_POST['association_email'] ?? '');
-    $number_of_trucks = (int)($_POST['number_of_trucks'] ?? 0);
+                        $registration_success = ucfirst(str_replace('_', ' ', $doc_type)) . ' has been successfully reuploaded.';
 
-    if (empty($association_name) || empty($license_number) || empty($region) || empty($contact_person) || empty($contact_phone) || empty($association_email) || $number_of_trucks <= 0) {
-        $registration_error = 'Please fill in all required fields.';
-    } elseif (!filter_var($association_email, FILTER_VALIDATE_EMAIL)) {
-        $registration_error = 'Please enter a valid email address.';
-    } else {
-        try {
-            // Begin transaction
-            $pdo->beginTransaction();
-
-            // Use the SYC ID from users table (already generated during signup)
-            $syc_id = $user_data['syc_id'];
-
-            // Initialize association data
-            $association_data = [
-                'user_id' => $user_id,
-                'syc_id' => $syc_id,
-                'name' => $association_name,
-                'license_number' => $license_number,
-                'region' => $region,
-                'contact_person' => $contact_person,
-                'phone' => $contact_phone,
-                'email' => $association_email,
-                'number_of_trucks' => $number_of_trucks,
-                'registration_status' => 'pending',
-                'created_at' => date('Y-m-d H:i:s')
-            ];
-
-            // Handle file uploads
-            $business_license = handleFileUpload('business_license');
-            $tin_certificate = handleFileUpload('tin_certificate');
-            $association_membership = handleFileUpload('association_membership');
-
-            if (isset($business_license['error'])) {
-                $registration_error = 'Business License: ' . $business_license['error'];
-            } elseif (isset($tin_certificate['error'])) {
-                $registration_error = 'TIN Certificate: ' . $tin_certificate['error'];
-            } elseif (isset($association_membership['error'])) {
-                $registration_error = 'Association Membership: ' . $association_membership['error'];
-            } else {
-                // Insert association data
-                $columns = implode(', ', array_keys($association_data));
-                $placeholders = str_repeat('?, ', count($association_data) - 1) . '?';
-
-                $association_sql = "INSERT INTO associations ($columns) VALUES ($placeholders)
-                                   ON DUPLICATE KEY UPDATE " .
-                                   implode(', ', array_map(function($col) { return "$col = VALUES($col)"; }, array_keys($association_data)));
-
-                $association_stmt = $pdo->prepare($association_sql);
-                $association_stmt->execute(array_values($association_data));
-
-                $association_id = $pdo->lastInsertId();
-
-                // Insert association documents
-                if ($business_license) {
-                    $pdo->prepare("INSERT INTO association_documents (association_id, document_type, file_path, original_filename) VALUES (?, ?, ?, ?)")->execute([$association_id, 'business_license', $business_license['path'], $business_license['original_name']]);
+                        // Redirect back to pending approval page
+                        header('Location: association-pending-approval.php?success=reupload');
+                        exit();
+                    }
                 }
-                if ($tin_certificate) {
-                    $pdo->prepare("INSERT INTO association_documents (association_id, document_type, file_path, original_filename) VALUES (?, ?, ?, ?)")->execute([$association_id, 'tin_certificate', $tin_certificate['path'], $tin_certificate['original_name']]);
-                }
-                if ($association_membership) {
-                    $pdo->prepare("INSERT INTO association_documents (association_id, document_type, file_path, original_filename) VALUES (?, ?, ?, ?)")->execute([$association_id, 'association_membership', $association_membership['path'], $association_membership['original_name']]);
-                }
-
-                // Commit transaction
-                $pdo->commit();
-
-                // Update session to indicate registration is complete
-                $_SESSION['association_registered'] = true;
-
-                // Redirect to pending approval page
-                header('Location: association-pending-approval.php');
-                exit();
+            } catch (Exception $e) {
+                error_log("Document reupload error: " . $e->getMessage());
+                $registration_error = 'Reupload failed. Please try again.';
             }
+        }
+    } else {
+        // Handle initial registration
+        // Common validation
+        $association_name = trim($_POST['association_name'] ?? '');
+        $license_number = trim($_POST['license_number'] ?? '');
+        $region = trim($_POST['region'] ?? '');
+        $contact_person = trim($_POST['contact_person'] ?? '');
+        $contact_phone = trim($_POST['contact_phone'] ?? '');
+        $association_email = trim($_POST['association_email'] ?? '');
+        $number_of_trucks = (int)($_POST['number_of_trucks'] ?? 0);
 
-        } catch (Exception $e) {
-            // Rollback transaction on error
-            $pdo->rollBack();
+        if (empty($association_name) || empty($license_number) || empty($region) || empty($contact_person) || empty($contact_phone) || empty($association_email) || $number_of_trucks <= 0) {
+            $registration_error = 'Please fill in all required fields.';
+        } elseif (!filter_var($association_email, FILTER_VALIDATE_EMAIL)) {
+            $registration_error = 'Please enter a valid email address.';
+        } else {
+            try {
+                // Begin transaction
+                $pdo->beginTransaction();
 
-            error_log("Association registration error: " . $e->getMessage());
-            $registration_error = 'Registration failed. Please try again. Error: ' . $e->getMessage();
+                // Use the SYC ID from users table (already generated during signup)
+                $syc_id = $user_data['syc_id'];
+
+                // Initialize association data
+                $association_data = [
+                    'user_id' => $user_id,
+                    'syc_id' => $syc_id,
+                    'name' => $association_name,
+                    'license_number' => $license_number,
+                    'region' => $region,
+                    'contact_person' => $contact_person,
+                    'phone' => $contact_phone,
+                    'email' => $association_email,
+                    'number_of_trucks' => $number_of_trucks,
+                    'registration_status' => 'pending',
+                    'created_at' => date('Y-m-d H:i:s')
+                ];
+
+                // Handle file uploads using secure helper
+                $business_license = handleSecureFileUpload('business_license', $syc_id);
+                $tin_certificate = handleSecureFileUpload('tin_certificate', $syc_id);
+                $association_membership = handleSecureFileUpload('association_membership', $syc_id);
+
+                if (isset($business_license['error'])) {
+                    $registration_error = 'Business License: ' . $business_license['error'];
+                } elseif (isset($tin_certificate['error'])) {
+                    $registration_error = 'TIN Certificate: ' . $tin_certificate['error'];
+                } elseif (isset($association_membership['error'])) {
+                    $registration_error = 'Association Membership: ' . $association_membership['error'];
+                } else {
+                    // Insert association data
+                    $columns = implode(', ', array_keys($association_data));
+                    $placeholders = str_repeat('?, ', count($association_data) - 1) . '?';
+
+                    $association_sql = "INSERT INTO associations ($columns) VALUES ($placeholders)
+                                       ON DUPLICATE KEY UPDATE " .
+                                       implode(', ', array_map(function($col) { return "$col = VALUES($col)"; }, array_keys($association_data)));
+
+                    $association_stmt = $pdo->prepare($association_sql);
+                    $association_stmt->execute(array_values($association_data));
+
+                    $association_id = $pdo->lastInsertId();
+
+                    // Insert association documents with enhanced metadata
+                    if ($business_license) {
+                        $pdo->prepare("INSERT INTO association_documents (association_id, document_type, user_folder, stored_path, original_filename, mime_type, size, checksum, uploaded_at, uploaded_by_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")->execute([
+                            $association_id, 'business_license', $business_license['user_folder'], $business_license['stored_path'],
+                            $business_license['original_name'], $business_license['mime_type'], $business_license['size'],
+                            $business_license['checksum'], $business_license['uploaded_at'], $business_license['uploaded_by_ip']
+                        ]);
+                    }
+                    if ($tin_certificate) {
+                        $pdo->prepare("INSERT INTO association_documents (association_id, document_type, user_folder, stored_path, original_filename, mime_type, size, checksum, uploaded_at, uploaded_by_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")->execute([
+                            $association_id, 'tin_certificate', $tin_certificate['user_folder'], $tin_certificate['stored_path'],
+                            $tin_certificate['original_name'], $tin_certificate['mime_type'], $tin_certificate['size'],
+                            $tin_certificate['checksum'], $tin_certificate['uploaded_at'], $tin_certificate['uploaded_by_ip']
+                        ]);
+                    }
+                    if ($association_membership) {
+                        $pdo->prepare("INSERT INTO association_documents (association_id, document_type, user_folder, stored_path, original_filename, mime_type, size, checksum, uploaded_at, uploaded_by_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")->execute([
+                            $association_id, 'association_membership', $association_membership['user_folder'], $association_membership['stored_path'],
+                            $association_membership['original_name'], $association_membership['mime_type'], $association_membership['size'],
+                            $association_membership['checksum'], $association_membership['uploaded_at'], $association_membership['uploaded_by_ip']
+                        ]);
+                    }
+
+                    // Commit transaction
+                    $pdo->commit();
+
+                    // Update session to indicate registration is complete
+                    $_SESSION['association_registered'] = true;
+
+                    // Redirect to pending approval page
+                    header('Location: association-pending-approval.php');
+                    exit();
+                }
+
+            } catch (Exception $e) {
+                // Rollback transaction on error
+                $pdo->rollBack();
+
+                error_log("Association registration error: " . $e->getMessage());
+                $registration_error = 'Registration failed. Please try again. Error: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -575,6 +633,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_registration
                 </div>
                 <?php endif; ?>
 
+                <?php if ($is_reupload && $reupload_doc_type): ?>
+                <!-- Reupload Form -->
+                <form class="registration-form" method="POST" action="association-registration.php?reupload=1&doc_type=<?php echo htmlspecialchars($reupload_doc_type); ?>" enctype="multipart/form-data">
+                    <input type="hidden" name="reupload_document" value="1">
+                    <input type="hidden" name="doc_type" value="<?php echo htmlspecialchars($reupload_doc_type); ?>">
+
+                    <!-- Document Reupload Section -->
+                    <div class="form-section">
+                        <h3 class="section-title">
+                            <i class="fas fa-file-upload"></i>
+                            Reupload Document
+                        </h3>
+
+                        <p class="mb-3">Please upload a new version of your <?php echo htmlspecialchars(str_replace('_', ' ', $reupload_doc_type)); ?>.</p>
+
+                        <div class="form-group">
+                            <label for="<?php echo htmlspecialchars($reupload_doc_type); ?>">
+                                <?php
+                                $doc_labels = [
+                                    'business_license' => 'Business License',
+                                    'tin_certificate' => 'TIN Certificate',
+                                    'association_membership' => 'Association Membership Certificate'
+                                ];
+                                echo htmlspecialchars($doc_labels[$reupload_doc_type] ?? $reupload_doc_type);
+                                ?> <span class="required">*</span>
+                            </label>
+                            <input type="file" id="<?php echo htmlspecialchars($reupload_doc_type); ?>" name="<?php echo htmlspecialchars($reupload_doc_type); ?>" accept=".pdf,.jpg,.jpeg,.png" required>
+                            <small class="file-hint">PDF, JPG, PNG up to 5MB</small>
+                        </div>
+                    </div>
+
+                    <!-- Form Actions -->
+                    <div class="form-actions">
+                        <a href="association-pending-approval.php" class="btn btn-outline">
+                            <i class="fas fa-arrow-left"></i> Back to Status
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Reupload Document
+                        </button>
+                    </div>
+                </form>
+                <?php else: ?>
+                <!-- Initial Registration Form -->
                 <form class="registration-form" method="POST" action="association-registration.php" enctype="multipart/form-data">
                     <input type="hidden" name="complete_registration" value="1">
 
@@ -679,6 +780,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_registration
                         </button>
                     </div>
                 </form>
+                <?php endif; ?>
             </div>
         </div>
     </div>

@@ -1,19 +1,28 @@
 <?php
-require_once 'db.php';
+require 'db.php';
 
 try {
-    $stmt = $pdo->query('SELECT COUNT(*) as count FROM association_documents');
-    $result = $stmt->fetch();
-    echo 'Total association documents: ' . $result['count'] . PHP_EOL;
+    $stmt = $pdo->query("SELECT id, stored_path, file_path, original_filename, document_type FROM association_documents ORDER BY id DESC");
+    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    if ($result['count'] > 0) {
-        $stmt = $pdo->query('SELECT ad.*, a.name as association_name FROM association_documents ad JOIN associations a ON ad.association_id = a.id LIMIT 5');
-        $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($docs as $doc) {
-            echo 'ID: ' . $doc['id'] . ', Association: ' . $doc['association_name'] . ', Type: ' . $doc['document_type'] . ', File: ' . $doc['original_filename'] . PHP_EOL;
+    echo "Association Documents:\n";
+    echo "====================\n";
+
+    if (empty($documents)) {
+        echo "No association documents found.\n";
+    } else {
+        foreach ($documents as $doc) {
+            echo "ID: {$doc['id']}\n";
+            echo "Stored Path: {$doc['stored_path']}\n";
+            echo "File Path: {$doc['file_path']}\n";
+            echo "Original Filename: {$doc['original_filename']}\n";
+            echo "Document Type: {$doc['document_type']}\n";
+
+            echo "---\n";
         }
     }
-} catch (Exception $e) {
-    echo 'Error: ' . $e->getMessage();
+
+} catch (PDOException $e) {
+    echo "Error: " . $e->getMessage() . "\n";
 }
 ?>

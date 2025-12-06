@@ -36,8 +36,8 @@ if (!$association) {
     exit();
 }
 
-// Get association documents
-$documents_stmt = $pdo->prepare("SELECT * FROM association_documents WHERE association_id = ?");
+// Get association documents with status information
+$documents_stmt = $pdo->prepare("SELECT id, association_id, document_type, status, rejection_reason, original_filename, stored_path, uploaded_at FROM association_documents WHERE association_id = ? ORDER BY document_type");
 $documents_stmt->execute([$association['id']]);
 $documents = $documents_stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -65,9 +65,27 @@ switch ($association['registration_status']) {
         ];
         break;
     case 'approved':
-        // This shouldn't happen as approved associations are redirected to dashboard
-        header('Location: association-dashboard.php');
-        exit();
+        // Check if all documents are approved before allowing dashboard access
+        $doc_check_stmt = $pdo->prepare("SELECT COUNT(*) as total_docs, SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_docs FROM association_documents WHERE association_id = ?");
+        $doc_check_stmt->execute([$association['id']]);
+        $doc_status = $doc_check_stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($doc_status['total_docs'] > 0 && $doc_status['approved_docs'] == $doc_status['total_docs']) {
+            // All documents approved, redirect to dashboard
+            header('Location: association-dashboard.php');
+            exit();
+        } else {
+            // Documents not approved, show pending approval page
+            $status_info = [
+                'title' => 'Document Approval Pending',
+                'message' => 'Your registration has been approved, but some documents are still under review. You will receive an email notification once all documents are approved.',
+                'icon' => 'fas fa-file-alt',
+                'color' => 'warning',
+                'progress' => 90,
+                'can_edit' => false
+            ];
+        }
+        break;
     case 'rejected':
         $status_info = [
             'title' => 'Registration Rejected',
@@ -495,6 +513,87 @@ switch ($association['registration_status']) {
             box-shadow: var(--shadow-md);
         }
 
+        /* Document Status Styles */
+        .document-status {
+            margin-top: 8px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-approved {
+            background: var(--success-green);
+            color: var(--white);
+        }
+
+        .status-rejected {
+            background: var(--danger-red);
+            color: var(--white);
+        }
+
+        .status-pending {
+            background: var(--warning-orange);
+            color: var(--white);
+        }
+
+        .rejection-reason {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid var(--danger-red);
+            border-radius: 4px;
+            color: #dc2626;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 8px;
+            flex-direction: column;
+        }
+
+        .document-actions .document-action {
+            padding: 8px 12px;
+            font-size: 12px;
+            min-width: auto;
+            justify-content: center;
+        }
+
+        .view-action {
+            background: var(--primary-blue);
+        }
+
+        .view-action:hover {
+            background: var(--secondary-blue);
+        }
+
+        .reupload-action {
+            background: var(--warning-orange);
+            color: var(--white);
+        }
+
+        .reupload-action:hover {
+            background: #d97706;
+        }
+
+        .document-icon.approved {
+            background: linear-gradient(135deg, var(--success-green) 0%, #059669 100%);
+        }
+
+        .document-icon.rejected {
+            background: linear-gradient(135deg, var(--danger-red) 0%, #dc2626 100%);
+        }
+
+        .document-icon.pending {
+            background: linear-gradient(135deg, var(--warning-orange) 0%, #d97706 100%);
+        }
+
         /* Action Buttons */
         .action-buttons {
             display: flex;
@@ -758,18 +857,36 @@ switch ($association['registration_status']) {
                     <?php foreach ($documents as $doc): ?>
                     <div class="document-card">
                         <div class="document-info">
-                            <div class="document-icon">
+                            <div class="document-icon <?php echo $doc['status'] === 'approved' ? 'approved' : ($doc['status'] === 'rejected' ? 'rejected' : 'pending'); ?>">
                                 <i class="fas fa-file-pdf"></i>
                             </div>
                             <div class="document-details">
                                 <h4><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $doc['document_type']))); ?></h4>
                                 <p><?php echo htmlspecialchars($doc['original_filename']); ?></p>
+                                <div class="document-status">
+                                    <span class="status-badge status-<?php echo $doc['status']; ?>">
+                                        <?php echo ucfirst($doc['status']); ?>
+                                    </span>
+                                    <?php if ($doc['status'] === 'rejected' && !empty($doc['rejection_reason'])): ?>
+                                    <div class="rejection-reason">
+                                        <small><strong>Reason:</strong> <?php echo htmlspecialchars($doc['rejection_reason']); ?></small>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </div>
-                        <a href="serve-file.php?id=<?php echo $doc['id']; ?>&type=association" class="document-action" target="_blank">
-                            <i class="fas fa-eye"></i>
-                            View Document
-                        </a>
+                        <div class="document-actions">
+                            <a href="serve-file.php?id=<?php echo $doc['id']; ?>&type=association" class="document-action view-action" target="_blank">
+                                <i class="fas fa-eye"></i>
+                                View
+                            </a>
+                            <?php if ($doc['status'] === 'rejected'): ?>
+                            <a href="association-registration.php?reupload=1&doc_type=<?php echo urlencode($doc['document_type']); ?>" class="document-action reupload-action">
+                                <i class="fas fa-upload"></i>
+                                Reupload
+                            </a>
+                            <?php endif; ?>
+                        </div>
                     </div>
                     <?php endforeach; ?>
                 </div>

@@ -10,16 +10,16 @@ $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        if (isset($_POST['approve_carrier'])) {
-            $carrier_id = $_POST['carrier_id'];
-            $stmt = $pdo->prepare("UPDATE carriers SET status = 'verified', updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$carrier_id]);
-            $message = "Carrier approved successfully!";
-        } elseif (isset($_POST['reject_carrier'])) {
-            $carrier_id = $_POST['carrier_id'];
-            $stmt = $pdo->prepare("UPDATE carriers SET status = 'rejected', updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$carrier_id]);
-            $message = "Carrier rejected successfully!";
+        if (isset($_POST['approve_association'])) {
+            $association_id = $_POST['association_id'];
+            $stmt = $pdo->prepare("UPDATE associations SET registration_status = 'approved', updated_at = NOW() WHERE id = ?");
+            $stmt->execute([$association_id]);
+            $message = "Association approved successfully!";
+        } elseif (isset($_POST['reject_association'])) {
+            $association_id = $_POST['association_id'];
+            $stmt = $pdo->prepare("UPDATE associations SET registration_status = 'rejected', updated_at = NOW() WHERE id = ?");
+            $stmt->execute([$association_id]);
+            $message = "Association rejected successfully!";
         } elseif (isset($_POST['change_user_type'])) {
             $user_id = $_POST['user_id'];
             $new_type = $_POST['user_type'];
@@ -28,10 +28,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = "User type updated successfully!";
         } elseif (isset($_POST['delete_user'])) {
             $user_id = $_POST['user_id'];
+            // Get user details for cleanup
+            $stmt = $pdo->prepare("SELECT syc_id, user_type FROM users WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($user) {
+                // Delete upload directory if it exists
+                include_once __DIR__ . '/../private/upload_helper.php';
+                $delete_result = deleteUserUploadDirectory($user['syc_id']);
+                if (isset($delete_result['error'])) {
+                    $error = "Failed to delete user uploads: " . $delete_result['error'];
+                }
+            }
+
             // Delete from users table (cascade will handle related tables)
             $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
             $stmt->execute([$user_id]);
-            $message = "User deleted successfully!";
+            $message = "User and associated data deleted successfully!";
         } elseif (isset($_POST['accept_bid'])) {
             $bid_id = $_POST['bid_id'];
             $stmt = $pdo->prepare("UPDATE bids SET status = 'accepted', updated_at = NOW() WHERE id = ?");
@@ -64,15 +78,15 @@ try {
     $stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE user_type = 'admin'");
     $stats['total_admins'] = $stmt->fetch()['total'];
 
-    // Carrier stats
-    $stmt = $pdo->query("SELECT COUNT(*) as total FROM carriers WHERE status = 'pending'");
-    $stats['pending_carriers'] = $stmt->fetch()['total'];
+    // Association stats
+    $stmt = $pdo->query("SELECT COUNT(*) as total FROM associations WHERE registration_status = 'pending'");
+    $stats['pending_associations'] = $stmt->fetch()['total'];
 
-    $stmt = $pdo->query("SELECT COUNT(*) as total FROM carriers WHERE status = 'verified'");
-    $stats['verified_carriers'] = $stmt->fetch()['total'];
+    $stmt = $pdo->query("SELECT COUNT(*) as total FROM associations WHERE registration_status = 'approved'");
+    $stats['approved_associations'] = $stmt->fetch()['total'];
 
-    $stmt = $pdo->query("SELECT COUNT(*) as total FROM carriers WHERE status = 'rejected'");
-    $stats['rejected_carriers'] = $stmt->fetch()['total'];
+    $stmt = $pdo->query("SELECT COUNT(*) as total FROM associations WHERE registration_status = 'rejected'");
+    $stats['rejected_associations'] = $stmt->fetch()['total'];
 
     // Load stats
     $stmt = $pdo->query("SELECT COUNT(*) as total FROM cargo");
@@ -114,6 +128,15 @@ try {
     $all_carriers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $all_carriers = [];
+}
+
+// Fetch all associations
+$all_associations = [];
+try {
+    $stmt = $pdo->query("SELECT * FROM associations ORDER BY registration_status, created_at DESC");
+    $all_associations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $all_associations = [];
 }
 
 // Fetch all loads
@@ -621,7 +644,7 @@ try {
             <ul>
                 <li><a href="#" class="active" data-tab="dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
                 <li><a href="#" data-tab="users"><i class="fas fa-users"></i> User Management</a></li>
-                <li><a href="#" data-tab="carriers"><i class="fas fa-truck"></i> Carrier Management</a></li>
+                <li><a href="#" data-tab="associations"><i class="fas fa-building"></i> Association Management</a></li>
                 <li><a href="#" data-tab="loads"><i class="fas fa-shipping-fast"></i> Load Management</a></li>
                 <li><a href="#" data-tab="bids"><i class="fas fa-gavel"></i> Bid Management</a></li>
                 <li><a href="#" data-tab="notifications"><i class="fas fa-bell"></i> Notifications</a></li>
@@ -720,8 +743,8 @@ try {
                             <i class="fas fa-clock"></i>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['pending_carriers']; ?></h3>
-                            <p>Pending Carriers</p>
+                            <h3><?php echo $stats['pending_associations']; ?></h3>
+                            <p>Pending Associations</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -729,8 +752,8 @@ try {
                             <i class="fas fa-check-circle"></i>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['verified_carriers']; ?></h3>
-                            <p>Verified Carriers</p>
+                            <h3><?php echo $stats['approved_associations']; ?></h3>
+                            <p>Approved Associations</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -738,8 +761,8 @@ try {
                             <i class="fas fa-times-circle"></i>
                         </div>
                         <div class="stat-info">
-                            <h3><?php echo $stats['rejected_carriers']; ?></h3>
-                            <p>Rejected Carriers</p>
+                            <h3><?php echo $stats['rejected_associations']; ?></h3>
+                            <p>Rejected Associations</p>
                         </div>
                     </div>
                     <div class="stat-card">
