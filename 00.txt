@@ -1,0 +1,32 @@
+# TODO: Refactor access.php for Role-First Authentication
+
+## Backend Logic (Role-First Authentication)
+- [x] Create API endpoint POST /api/v1/auth/login
+- [x] Implement role resolution (join users table with roles table using role_id)
+- [x] Add JWT authentication with HttpOnly cookies
+- [x] Update dynamic routing: shipper → /shipper/, association → /association/, transitor → /transitor/
+- [x] Implement account status flow: pending_verification → /upload-documents.php, active → role dashboard
+
+## UI/UX — Commercial Entry Point
+- [x] Add role switcher (horizontal selector: [ Shipper ] | [ Association ] | [ Transitor ])
+- [x] Make role switcher affect helper text and be sent in login/register payload
+- [x] Update smart identifier field to accept email or phone
+- [x] Add role-specific fields for signup (Company Name, TIN, Contact Person, Business Category for Shipper; Association Name, License No., Fleet Size, Manager ID for Association; Transitor License/ID, Port of Operation, Customs Agency Code for Transitor)
+- [ ] Add future-ready OTP placeholder (commented or disabled link)
+- [ ] Replace all text with localization keys (e.g., $i18n.auth.login)
+- [ ] Add language toggle: English | አማርኛ
+
+## Registration (Business Verification Required)
+- [ ] Update Shipper registration: Company Name, TIN, Contact Person, Business Category
+- [ ] Update Association registration: Association Name, Ministry of Transport License No., Estimated Fleet Size, Manager ID
+- [ ] Update Transitor registration: Transitor License / ID, Port of Operation, Customs Agency Code
+
+## Security & UX Rules
+- [ ] Use generic errors: "Invalid credentials"
+- [ ] Add loading indicators
+- [ ] Ensure no leakage of verification or auth logic
+
+## Final Output
+- [ ] Update access.php with all changes
+- [ ] Add supporting JS if required
+- [ ] Add clear comments for newly added logic

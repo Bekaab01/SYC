@@ -1,0 +1,2 @@
+Starting database migration at 2026-01-03 08:58:19
+Error: Could not read migration file.

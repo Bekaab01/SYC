@@ -1,0 +1,10 @@
+Starting missing tables creation at 2026-01-03 09:41:27
+SQL file loaded successfully. Size: 1792 bytes
+Found 2 SQL statements to execute
+✓ Statement 1 executed successfully
+✓ Statement 2 executed successfully
+
+Table creation completed!
+Successful statements: 2
+Failed statements: 0
+✅ All missing tables created successfully!

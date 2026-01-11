@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Simple truck logo with SYC text -->
+  <style>
+    .primary-blue { fill: #0d3c61; }
+    .primary-yellow { fill: #ffd100; }
+    .logo-text { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight: bold; }
+  </style>
+
+  <!-- Truck Body -->
+  <rect class="primary-blue" x="15" y="55" width="50" height="25" rx="3" />
+
+  <!-- Truck Cabin -->
+  <rect class="primary-blue" x="65" y="60" width="20" height="20" rx="2" />
+
+  <!-- Wheels -->
+  <circle class="primary-yellow" cx="25" cy="85" r="8" />
+  <circle class="primary-yellow" cx="55" cy="85" r="8" />
+  <circle class="primary-yellow" cx="75" cy="85" r="8" />
+
+  <!-- SYC Text -->
+  <text x="18" y="73" class="primary-yellow logo-text" font-size="14">SYC</text>
+</svg>

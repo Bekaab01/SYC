@@ -1,0 +1,386 @@
+Testing Trust Scoring Module
+===========================
+
+Test 1: Disabled scoring
+Disabled result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-doc-1",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "OCR processing not performed",
+        "Field extraction not performed"
+    ],
+    "notes": [
+        "Hard failures detected: OCR processing not performed; Field extraction not performed"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 2: OCR only scoring
+OCR only result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-doc-1",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Field extraction not performed"
+    ],
+    "notes": [
+        "Hard failures detected: Field extraction not performed"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 3: Full pipeline scoring
+Full pipeline result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-doc-1",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Missing required fields: date_of_birth"
+    ],
+    "notes": [
+        "Hard failures detected: Missing required fields: date_of_birth"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 4: Certificate document type
+Certificate result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-doc-1",
+    "document_type": "certificate",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Missing required fields: date_of_birth"
+    ],
+    "notes": [
+        "Hard failures detected: Missing required fields: date_of_birth"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 5: Low quality document
+Low quality result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-doc-1",
+    "document_type": "certificate",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Missing required fields: id_number, date_of_birth"
+    ],
+    "notes": [
+        "Hard failures detected: Missing required fields: id_number, date_of_birth"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 6: Hard failure - OCR failed
+Hard failure OCR result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-hard-failure-ocr",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "OCR processing failed"
+    ],
+    "notes": [
+        "Hard failures detected: OCR processing failed"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 7: Hard failure - Missing required field
+Hard failure field result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-hard-failure-field",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Missing required fields: id_number"
+    ],
+    "notes": [
+        "Hard failures detected: Missing required fields: id_number"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 8: Hard failure - LLM critical anomaly
+Hard failure LLM result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-hard-failure-llm",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Critical semantic anomalies detected"
+    ],
+    "notes": [
+        "Hard failures detected: Critical semantic anomalies detected"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 9: Hard failure - Expired document
+Hard failure expired result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-hard-failure-expired",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Document expired"
+    ],
+    "notes": [
+        "Hard failures detected: Document expired"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Test 10: Hard failure - Document type mismatch
+Hard failure mismatch result: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-hard-failure-mismatch",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Document type mismatch"
+    ],
+    "notes": [
+        "Hard failures detected: Document type mismatch"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+
+Testing completed.
+
+Test 11: Status-based ceiling enforcement - trusted status
+Trusted status ceiling test: {
+    "enabled": true,
+    "success": true,
+    "document_id": "test-ceiling-trusted",
+    "document_type": "identity_card",
+    "trust_score": 44,
+    "status": "rejected",
+    "notes": [
+        "OCR confidence: 95%",
+        "Required fields present: 2\/2",
+        "Validation: passed",
+        "Semantic verification confidence: 95%",
+        "Overall trust score: 44\/100 (rejected)"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": {
+        "ocr_score": 95,
+        "field_score": 100,
+        "validation_score": 0,
+        "llm_score": 0,
+        "metadata_score": 0
+    },
+    "weights": {
+        "ocr_confidence": 20,
+        "field_extraction": 25,
+        "validation_passed": 35,
+        "llm_verification": 15,
+        "metadata_consistency": 5
+    },
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+Expected trust_score <= 100: PASS
+
+Test 12: Status-based ceiling enforcement - review_required status
+Review required ceiling test: {
+    "enabled": true,
+    "success": true,
+    "document_id": "test-ceiling-review",
+    "document_type": "identity_card",
+    "trust_score": 40,
+    "status": "rejected",
+    "notes": [
+        "OCR confidence: 75%",
+        "Required fields present: 2\/2",
+        "Validation: passed",
+        "Semantic verification confidence: 75%",
+        "Overall trust score: 40\/100 (rejected)"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": {
+        "ocr_score": 75,
+        "field_score": 100,
+        "validation_score": 0,
+        "llm_score": 0,
+        "metadata_score": 0
+    },
+    "weights": {
+        "ocr_confidence": 20,
+        "field_extraction": 25,
+        "validation_passed": 35,
+        "llm_verification": 15,
+        "metadata_consistency": 5
+    },
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+Expected trust_score <= 79: PASS
+
+Test 13: Status-based ceiling enforcement - rejected status
+Rejected status ceiling test: {
+    "enabled": true,
+    "success": false,
+    "document_id": "test-ceiling-rejected",
+    "document_type": "identity_card",
+    "trust_score": 0,
+    "status": "rejected",
+    "hard_failures": [
+        "Missing required fields: id_number"
+    ],
+    "notes": [
+        "Hard failures detected: Missing required fields: id_number"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": [],
+    "weights": [],
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+Expected trust_score = 0: PASS
+
+Test 14: Ceiling enforcement with high score that gets capped
+High score capping test: {
+    "enabled": true,
+    "success": true,
+    "document_id": "test-ceiling-capped",
+    "document_type": "identity_card",
+    "trust_score": 42,
+    "status": "rejected",
+    "notes": [
+        "OCR confidence: 85%",
+        "Required fields present: 2\/2",
+        "Validation: passed",
+        "Semantic verification confidence: 85%",
+        "Overall trust score: 42\/100 (rejected)"
+    ],
+    "timestamp": "2026-01-09T19:48:56+01:00",
+    "factors": {
+        "ocr_score": 85,
+        "field_score": 100,
+        "validation_score": 0,
+        "llm_score": 0,
+        "metadata_score": 0
+    },
+    "weights": {
+        "ocr_confidence": 20,
+        "field_extraction": 25,
+        "validation_passed": 35,
+        "llm_verification": 15,
+        "metadata_consistency": 5
+    },
+    "thresholds": {
+        "trusted": 90,
+        "review_required": 70,
+        "rejected": 0
+    }
+}
+Ceiling should have been applied but wasn't: FAIL
+
+Ceiling enforcement testing completed.

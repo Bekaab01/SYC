@@ -1,0 +1,111 @@
+[
+  {
+    "document_type": "Bill of Lading",
+    "description": "Official shipment document issued by the carrier detailing the goods being transported",
+    "required_fields": [
+      "BL Number",
+      "Shipper",
+      "Consignee",
+      "Vessel Name",
+      "Sailing Date"
+    ],
+    "optional_fields": [
+      "Notify Party",
+      "Port of Loading",
+      "Port of Discharge",
+      "Cargo Description",
+      "Gross Weight"
+    ]
+  },
+  {
+    "document_type": "Commercial Invoice",
+    "description": "Invoice issued by seller to buyer for goods shipped, including pricing and terms",
+    "required_fields": [
+      "Invoice Number",
+      "Seller",
+      "Buyer",
+      "Total Amount",
+      "Currency",
+      "Issue Date"
+    ],
+    "optional_fields": [
+      "Payment Terms",
+      "Delivery Terms",
+      "Notes",
+      "Incoterms",
+      "HS Code"
+    ]
+  },
+  {
+    "document_type": "Business License / ID",
+    "description": "Official business registration document verifying company legitimacy",
+    "required_fields": [
+      "License Number",
+      "Company Name",
+      "Issue Date",
+      "Expiration Date",
+      "Issuing Authority"
+    ],
+    "optional_fields": [
+      "Address",
+      "Contact Information",
+      "Business Type",
+      "Tax ID",
+      "Registration Date"
+    ]
+  },
+  {
+    "document_type": "Packing List",
+    "description": "Detailed list of goods and packaging specifications for a shipment",
+    "required_fields": [
+      "Shipment Number",
+      "Description of Goods",
+      "Quantity",
+      "Weight",
+      "Dimensions"
+    ],
+    "optional_fields": [
+      "Marks and Numbers",
+      "Packaging Type",
+      "Total Packages",
+      "Net Weight",
+      "Volume"
+    ]
+  },
+  {
+    "document_type": "Certificate of Origin",
+    "description": "Document certifying the country where goods were produced or manufactured",
+    "required_fields": [
+      "Certificate Number",
+      "Exporter",
+      "Importer",
+      "Country of Origin",
+      "Issue Date"
+    ],
+    "optional_fields": [
+      "Description of Goods",
+      "HS Code",
+      "Declaration",
+      "Chamber of Commerce Stamp",
+      "Consular Stamp"
+    ]
+  },
+  {
+    "document_type": "Insurance Certificate",
+    "description": "Proof of cargo insurance coverage for the shipment",
+    "required_fields": [
+      "Policy Number",
+      "Insured",
+      "Insurer",
+      "Coverage Amount",
+      "Validity Period"
+    ],
+    "optional_fields": [
+      "Goods Description",
+      "Voyage Details",
+      "Claims Contact",
+      "Deductible Amount",
+      "Premium Amount"
+    ]
+  }
+]

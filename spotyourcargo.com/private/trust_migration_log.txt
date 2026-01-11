@@ -1,0 +1,14 @@
+Starting trust management migration at 2026-01-05 14:37:34
+Migration file loaded successfully. Size: 2889 bytes
+Found 6 SQL statements to execute
+✓ Statement 1 executed successfully
+✓ Statement 2 executed successfully
+✓ Statement 3 executed successfully
+✓ Statement 4 executed successfully
+✓ Statement 5 executed successfully
+✓ Statement 6 executed successfully
+
+Migration completed!
+Successful statements: 6
+Failed statements: 0
+✅ All migrations applied successfully!
